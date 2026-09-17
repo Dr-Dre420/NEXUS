@@ -1,0 +1,125 @@
+{
+  "research_program": "M2D propagation representation research",
+  "baseline_commit": "b5d3dd475b9f0b81c7c2ad101dc37360b978c157",
+  "generated": "2026-09-17T11:14:20.210306+00:00",
+  "frozen_artifacts_untouched": [
+    "data/frozen_m2c/evaluation.json",
+    "data/frozen_m2c/model_b.pkl",
+    "data/frozen_m2c/model_c.pkl",
+    "data/frozen_m2c/world_state.pkl",
+    "data/frozen_m2c/baseline_state.pkl"
+  ],
+  "world_generation": {
+    "n_borrowers": 400,
+    "n_weeks": 156,
+    "slack_regime": "conservative",
+    "independent_per_seed": true,
+    "pooled_for_splitting": false
+  },
+  "temporal_protocol": {
+    "train": "weeks 1-78",
+    "purge": "weeks 79-86 and 119-126",
+    "val": "weeks 87-118",
+    "test": "weeks 127-156",
+    "purge_gap_weeks": 8
+  },
+  "calibration": {
+    "method": "Platt (LogisticRegression)",
+    "fitted_on": "validation split only",
+    "test_labels_used": false
+  },
+  "model": "LightGBM binary, lr=0.05, num_leaves=31, max_depth=5, random_state=42, 200 rounds, early stop 20",
+  "stages": {
+    "research_development": {
+      "purpose": "candidate formulation",
+      "data": "structural forensics on seed 909 only; no target outcomes used"
+    },
+    "research_validation": {
+      "purpose": "candidate selection",
+      "seeds": [
+        42,
+        101,
+        202,
+        303,
+        404,
+        505,
+        606,
+        707,
+        808,
+        909
+      ]
+    },
+    "research_holdout": {
+      "purpose": "final evaluation, scored once",
+      "seeds": [
+        1201,
+        1302,
+        1403,
+        1504,
+        1605,
+        1706,
+        1807,
+        1807,
+        1908,
+        2009,
+        2110
+      ]
+    }
+  },
+  "targets": {
+    "propagation_vulnerability": {
+      "status": "FROZEN M2C TARGET \u2014 unmodified, carried for reference",
+      "scoreable_seeds_validation": "4/10",
+      "scoreable_seeds_holdout": "5/10"
+    },
+    "rt_new_stress": {
+      "status": "RESEARCH TARGET \u2014 newly stressed borrower, no network attribution",
+      "purpose": "provides ~4-5x more positives so a comparison has any power",
+      "scoreable_seeds": "10/10"
+    },
+    "rt_pv_window": {
+      "status": "RESEARCH TARGET \u2014 PV with episode-timing relaxed to the window"
+    },
+    "rt_net_stress_any": {
+      "status": "RESEARCH TARGET \u2014 PV with contribution threshold relaxed to >0"
+    }
+  },
+  "model_specs": {
+    "A": "individual financial features only (43)",
+    "B": "individual + network context (51) \u2014 the baseline to beat",
+    "B+P0_m2c_exposure": "B + frozen borrower_propagation_exposure (= Model C)",
+    "B+P1_liab_channel": "B + contractual-liability-weighted peer stress",
+    "B+P2_concentration": "B + peer stress max / count / HHI",
+    "B+P3_persistence": "B + time-decayed peer stress + velocity",
+    "B+P4_dest_fragility": "B + absolute buffer adequacy + destination vulnerability",
+    "B+P5_process": "B + composite source x channel x persistence x destination scalar",
+    "B+P6_full": "B + all 10 research propagation features"
+  },
+  "ablations": [
+    "ab1_B",
+    "ab2_B_plus_propagation",
+    "ab3_B_peer_context_only",
+    "ab4_propagation_without_peerctx",
+    "ab5_individual_plus_propagation",
+    "ab6_propagation_alone",
+    "ab7_B_minus_peerctx"
+  ],
+  "imbalance_regimes": [
+    "default",
+    "balanced_weight",
+    "low_min_child",
+    "balanced+lowmin"
+  ],
+  "metrics": [
+    "pr_auc",
+    "roc_auc",
+    "pr_auc_cal",
+    "roc_auc_cal",
+    "precision",
+    "recall",
+    "brier",
+    "n_trees",
+    "n_unique_pred"
+  ],
+  "total_experiment_rows": 360
+}
