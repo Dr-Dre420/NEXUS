@@ -50,36 +50,54 @@ NEXUS formalizes the investigation of network-driven financial stress into a six
 NEXUS is composed of six purpose-built analytical workspaces:
 
 ### 1. Command Center
+
+![Command Center](./screenshots/01_command_center.png)
+
 * **Purpose**: Portfolio-level triage and macro-risk observability.
 * **What you see**: Key operational risk metrics, distribution of risk tiers, and aggregate network exposure.
 * **Action**: Identify the highest-risk borrowers and most exposed groups for deeper investigation.
 * **Why it matters**: Focuses limited institutional resources on the most vulnerable nodes in the network.
 
 ### 2. Borrower Intelligence
+
+![Borrower Intelligence](./screenshots/02_borrower_intelligence.png)
+
 * **Purpose**: Deep-dive diagnostic view of an individual.
 * **What you see**: Financial state (cash buffers, shortfalls), operational risk score (percentile rank), and network propagation exposure.
 * **Action**: Evaluate the specific drivers of a borrower's vulnerability.
 * **Why it matters**: contextualizes a raw probability score with concrete financial realities.
 
 ### 3. Network Intelligence
+
+![Network Intelligence](./screenshots/03_network_intelligence.png)
+
 * **Purpose**: Visualization of group liability topologies.
 * **What you see**: Star-topology graphs of JLG groups, showing how individual exposure aggregates at the group level.
 * **Action**: Trace potential contagion paths within a specific group.
 * **Why it matters**: Reveals hidden structural vulnerabilities that borrower-level models miss.
 
 ### 4. Ripple Simulator
+
+![Ripple Simulator](./screenshots/04_ripple_simulator.png)
+
 * **Purpose**: Forward-looking stress testing.
 * **What you see**: Side-by-side trajectories of a baseline state vs. a shocked scenario (e.g., income reduction, expense increase).
 * **Action**: Define shock magnitude and duration, and watch the deterministic downstream effects on the borrower and their peers.
 * **Why it matters**: Tests the resilience of the network under adverse conditions before they happen.
 
 ### 5. Intervention Studio
+
+![Intervention Studio](./screenshots/05_intervention_studio.png)
+
 * **Purpose**: Actionable policy modeling.
 * **What you see**: The counterfactual trajectory of a borrower's financial state under explicit intervention assumptions.
 * **Action**: Apply specific interventions (e.g., cash injection) and measure the theoretical delta.
 * **Why it matters**: Translates risk identification into actionable, measurable policy responses.
 
 ### 6. Model & Impact Lab
+
+![Model & Impact Lab](./screenshots/06_model_impact_lab.png)
+
 * **Purpose**: Transparency and scientific integrity.
 * **What you see**: The actual evaluation metrics, temporal rules, and final conclusions of the underlying research.
 * **Action**: Review the provenance, assumptions, and disclaimers of the analytical engine.
