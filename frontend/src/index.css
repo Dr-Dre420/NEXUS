@@ -53,6 +53,85 @@
 html, body, #root { height: 100%; }
 html, body { max-width: 100%; overflow-x: hidden; }
 
+/* ============================ AMBIENT BACKGROUND ============================ */
+/* User-provided hexagonal gradient animation, attenuated to a subtle atmosphere
+   behind the dark analytical workspace.  Pure CSS — no React re-renders.
+   Stacking:  #root::before (effect) → #root::after (dark tint) → .app (content) */
+
+#root { position: relative; isolation: isolate; }
+
+#root::before {
+  content: "";
+  position: fixed;
+  inset: -1em;
+  z-index: -2;
+  pointer-events: none;
+
+  --c: 7px;
+  background-color: #000;
+  background-image:
+    radial-gradient(circle at 50% 50%, #0000 1.5px, #000 0 var(--c), #0000 var(--c)),
+    radial-gradient(circle at 50% 50%, #0000 1.5px, #000 0 var(--c), #0000 var(--c)),
+    radial-gradient(circle at 50% 50%, #f00, #f000 60%),
+    radial-gradient(circle at 50% 50%, #ff0, #ff00 60%),
+    radial-gradient(circle at 50% 50%, #0f0, #0f00 60%),
+    radial-gradient(ellipse at 50% 50%, #00f, #00f0 60%);
+  background-size:
+    12px 20.7846097px,
+    12px 20.7846097px,
+    200% 200%,
+    200% 200%,
+    200% 200%,
+    200% 20.7846097px;
+  --p: 0px 0px, 6px 10.39230485px;
+  background-position:
+    var(--p),
+    0% 0%,
+    0% 0%,
+    0% 0px;
+
+  opacity: 0.07;
+  animation:
+    nexus-ambient-move 40s linear infinite,
+    nexus-ambient-hue  6s linear infinite;
+}
+
+/* Dark tint overlay — crushes any remaining saturation bleed so panels and
+   text always dominate the visual hierarchy. */
+#root::after {
+  content: "";
+  position: fixed;
+  inset: -1em;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--bg-app);
+  opacity: 0.55;
+}
+
+@keyframes nexus-ambient-hue {
+  from { filter: hue-rotate(0deg); }
+  to   { filter: hue-rotate(360deg); }
+}
+
+@keyframes nexus-ambient-move {
+  from {
+    background-position:
+      var(--p),
+      800% 400%,
+      1000% -400%,
+      -1200% -600%,
+      400% 41.5692194px;
+  }
+  to {
+    background-position:
+      var(--p),
+      0% 0%,
+      0% 0%,
+      0% 0%,
+      0% 0%;
+  }
+}
+
 body {
   background: var(--bg-app);
   color: var(--text);
