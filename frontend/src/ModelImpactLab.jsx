@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  FlaskConical, ShieldCheck, Database, BarChart3, Info, TriangleAlert, Scale,
+  FlaskConical, ShieldCheck, Database, BarChart3, Info, TriangleAlert, Scale, Users,
 } from 'lucide-react';
 import { api } from './lib/api';
 import { count, indexValue, percent } from './lib/format';
@@ -15,6 +16,7 @@ export default function ModelImpactLab() {
   const [assumptions, setAssumptions] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const nav = useNavigate();
 
   const load = useCallback(() => {
     setLoading(true);
@@ -269,6 +271,14 @@ export default function ModelImpactLab() {
                   {data.final_scientific_conclusion}
                 </p>
               </details>
+            </Panel>
+
+            <Panel>
+              <div className="action-bar">
+                <button className="btn" onClick={() => nav('/command-center')}>
+                  <Users size={14} aria-hidden="true" /> Back to Portfolio
+                </button>
+              </div>
             </Panel>
           </div>
         )}

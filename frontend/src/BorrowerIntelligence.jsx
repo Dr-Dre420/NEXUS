@@ -148,7 +148,8 @@ export default function BorrowerIntelligence() {
                 aside={<SemanticBadge kind="predictive" />}
                 note="This is the only predictive quantity on this page. It is the calibrated Model C probability of propagation vulnerability within the evaluation horizon. It is not a statement that this borrower will default.">
                 <Metric
-                  label="Calibrated Model C probability"
+                  label="Operational Risk Score"
+                  title="Calibrated Model C output for the selected borrower at the current prediction cutoff."
                   value={probability(risk.score)}
                   semantic="predictive"
                   sub={`Model B comparison baseline: ${probability(risk.baseline_score)}`}
@@ -194,7 +195,8 @@ export default function BorrowerIntelligence() {
                   sub="Mean modeled stress probability across the other members of this group."
                 />
                 <Metric
-                  label="Group buffer share"
+                  label="Liability"
+                  title="Relative share of eligible group liability represented by this connection."
                   value={percent(netv.borrower_liability_share, 2)}
                   semantic="diagnostic"
                   sub="This borrower's cash buffer as a share of the group total. A relative liquidity measure, not a contractual liability percentage."

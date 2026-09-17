@@ -137,7 +137,7 @@ export default function NetworkIntelligence() {
           {!group && !groupLoading && !groupErr && (
             <Panel>
               <EmptyState icon={MousePointerClick} title="Select a joint-liability group"
-                message="Choose a group from the index to see its structure, member risk and diagnostic network evidence." />
+                message="Select a borrower or group to inspect its network context." />
             </Panel>
           )}
           {groupLoading && <Panel><LoadingState label="Loading group" /></Panel>}
@@ -180,10 +180,11 @@ export default function NetworkIntelligence() {
                       {/* edges */}
                       {layout.hub && layout.members.map((m) => {
                         const isSel = selected?.id === m.id;
+                        const edgeStroke = isSel ? 'var(--diagnostic)' : (selected ? 'rgba(148,163,184,0.05)' : 'rgba(148,163,184,0.22)');
                         return (
                           <line key={`e-${m.id}`}
                             x1={layout.hub.x} y1={layout.hub.y} x2={m.x} y2={m.y}
-                            stroke={isSel ? 'var(--diagnostic)' : 'rgba(148,163,184,0.22)'}
+                            stroke={edgeStroke}
                             strokeWidth={isSel ? 2 : 1.2} />
                         );
                       })}
@@ -199,12 +200,14 @@ export default function NetworkIntelligence() {
                       {/* members */}
                       {layout.members.map((m) => {
                         const isSel = selected?.id === m.id;
+                        const isDimmed = selected && !isSel;
                         const r = 14 + 8 * Math.sqrt(m.borrower_propagation_exposure / maxMemberExposure || 0);
                         return (
                           <g key={m.id} className="graph-node" tabIndex={0} role="button"
                             aria-label={`Borrower ${m.id}, ${m.current_stress ? 'stressed' : 'not stressed'}, risk tier ${m.risk_tier}`}
                             onClick={() => setSelected(m)}
-                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelected(m))}>
+                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelected(m))}
+                            opacity={isDimmed ? 0.25 : 1}>
                             {isSel && <circle cx={m.x} cy={m.y} r={r + 6} fill="none" stroke="var(--diagnostic)" strokeWidth="1.5" opacity="0.55" />}
                             <circle cx={m.x} cy={m.y} r={r}
                               fill={m.current_stress ? 'rgba(240,101,111,0.9)' : 'rgba(63,191,143,0.85)'}
@@ -261,8 +264,8 @@ export default function NetworkIntelligence() {
                     <div>
                       <DataRow label="Cash buffer (4w avg)" value={currency(selected.cash_buffer_mean_4w, true)} />
                       <DataRow label="Weekly income (4w avg)" value={currency(selected.weekly_income_mean_4w, true)} />
-                      <DataRow label="Group buffer share" value={percent(selected.liability_share, 2)}
-                        hint="Share of the group's total cash buffer held by this borrower." />
+                      <DataRow label="Liability" value={percent(selected.liability_share, 2)}
+                        hint="Relative share of eligible group liability represented by this connection." />
                     </div>
 
                     <div className="action-bar">

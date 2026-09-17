@@ -14,7 +14,7 @@ export const SEMANTIC = {
     cls: 'predictive',
     label: 'Predictive',
     badge: 'badge-predictive',
-    help: 'Model output. Calibrated Model C probability.',
+    help: 'Calibrated Model C output for the selected borrower at the current prediction cutoff.',
   },
   diagnostic: {
     cls: 'diagnostic',
@@ -24,7 +24,7 @@ export const SEMANTIC = {
   },
   counterfactual: {
     cls: 'counterfactual',
-    label: 'Counterfactual',
+    label: 'Scenario',
     badge: 'badge-counterfactual',
     help: 'Modeled scenario under stated assumptions. Not a forecast.',
   },

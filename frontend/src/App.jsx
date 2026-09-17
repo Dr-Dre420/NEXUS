@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Activity, Users, Share2, Waves, SlidersHorizontal, FlaskConical } from 'lucide-react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { Activity, Users, Share2, Waves, SlidersHorizontal, FlaskConical, Search } from 'lucide-react';
 import './index.css';
 
-import { api } from './lib/api';
+import { api, canonicalBorrower, canonicalGroup } from './lib/api';
 import CommandCenter from './CommandCenter';
 import BorrowerIntelligence from './BorrowerIntelligence';
 import NetworkIntelligence from './NetworkIntelligence';
@@ -45,6 +45,76 @@ function Provenance() {
   );
 }
 
+function GlobalSearch() {
+  const [query, setQuery] = useState('');
+  const [error, setError] = useState(false);
+  const nav = useNavigate();
+  const { setBorrowerId, setGroupId } = useSelection();
+
+  const submit = (e) => {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+
+    const b = canonicalBorrower(q);
+    const g = canonicalGroup(q);
+
+    if (b) {
+      setBorrowerId(b);
+      setError(false);
+      setQuery('');
+      nav('/borrower');
+    } else if (g) {
+      setGroupId(g);
+      setError(false);
+      setQuery('');
+      nav('/network');
+    } else {
+      setError(true);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="rail-search" role="search">
+      <label htmlFor="global-search" className="sr-only">Global search</label>
+      <div style={{ position: 'relative' }}>
+        <Search size={13} className="rail-search-icon" aria-hidden="true" />
+        <input
+          id="global-search"
+          className="input input-mono rail-search-input"
+          placeholder="Search borrower, group, or branch..."
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setError(false); }}
+          aria-invalid={error ? 'true' : 'false'}
+        />
+      </div>
+      {error && <div className="rail-search-error">No such borrower or group found.</div>}
+    </form>
+  );
+}
+
+function SystemStatus() {
+  const [status, setStatus] = useState('checking');
+
+  useEffect(() => {
+    api.health()
+      .then((res) => {
+        if (res.status === 'ok' && res.loaded) setStatus('ok');
+        else setStatus('error');
+      })
+      .catch(() => setStatus('error'));
+  }, []);
+
+  return (
+    <div className="rail-status">
+      <span className={`status-dot status-${status}`} />
+      <span className="status-label">
+        {status === 'ok' ? 'API connected · M2C loaded' : status === 'checking' ? 'Checking system status...' : 'System offline'}
+      </span>
+    </div>
+  );
+}
+
 function Shell({ children }) {
   return (
     <div className="app">
@@ -54,6 +124,7 @@ function Shell({ children }) {
           <div className="rail-brand-mark">NEXUS</div>
           <div className="rail-brand-sub">Financial Resilience Intelligence</div>
         </div>
+        <GlobalSearch />
         <nav className="rail-nav" aria-label="Primary">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -67,6 +138,7 @@ function Shell({ children }) {
           ))}
         </nav>
         <Provenance />
+        <SystemStatus />
       </aside>
       <main className="main">{children}</main>
     </div>

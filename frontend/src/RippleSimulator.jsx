@@ -72,7 +72,7 @@ export default function RippleSimulator() {
     <>
       <PageHeader
         title="Ripple Simulator"
-        subtitle="Apply a hypothetical shock to one borrower and trace the modeled effect on that borrower and on the rest of their joint-liability group, against an unshocked baseline."
+        subtitle="Explore how a defined financial shock changes the modeled borrower and network state."
       >
         <SemanticBadge kind="counterfactual" />
       </PageHeader>
@@ -182,8 +182,8 @@ export default function RippleSimulator() {
                       Baseline {currency(summary.cash.baseline)} · delta {summary.cash.delta >= 0 ? '+' : ''}{currency(summary.cash.delta)}
                     </div>
                   </div>
-                  <div className="metric-card">
-                    <span className="metric-label">Cumulative target shortfall</span>
+                  <div className="metric-card" title="Cumulative downstream shortfall measured over the defined scenario horizon.">
+                    <span className="metric-label">Downstream Burden</span>
                     <div className="metric-primary is-counterfactual">{currency(summary.shortfall.scenario)}</div>
                     <div className="metric-sub">Baseline {currency(summary.shortfall.baseline)}</div>
                   </div>

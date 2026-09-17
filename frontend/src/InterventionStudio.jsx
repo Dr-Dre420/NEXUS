@@ -89,7 +89,7 @@ export default function InterventionStudio() {
     <>
       <PageHeader
         title="Intervention Studio"
-        subtitle="Apply a supported intervention to one borrower and compare the modeled counterfactual against the untouched baseline over the same horizon."
+        subtitle="Model how borrower or group conditions change under defined intervention assumptions."
       >
         <SemanticBadge kind="counterfactual" />
       </PageHeader>
@@ -139,7 +139,7 @@ export default function InterventionStudio() {
             <button type="submit" className="btn btn-counterfactual btn-block" disabled={loading}
               style={{ marginTop: 6 }}>
               <Play size={14} aria-hidden="true" />
-              {loading ? 'Evaluating' : 'Evaluate intervention'}
+              {loading ? 'Modeling scenario…' : 'Model Scenario'}
             </button>
           </form>
 
@@ -208,7 +208,7 @@ export default function InterventionStudio() {
                       <DeltaRow label={`Target cash buffer · week ${summary.weeks}`}
                         baseline={summary.cash.baseline} scenario={summary.cash.scenario}
                         delta={summary.cash.delta} betterWhenLower={false} />
-                      <DeltaRow label="Cumulative target shortfall"
+                      <DeltaRow label={<span title="Cumulative downstream shortfall measured over the defined scenario horizon.">Downstream Burden</span>}
                         baseline={summary.shortfall.baseline} scenario={summary.shortfall.scenario}
                         delta={summary.shortfall.delta} />
                       {summary.due && (
