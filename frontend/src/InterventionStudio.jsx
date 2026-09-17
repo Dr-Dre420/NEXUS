@@ -138,7 +138,7 @@ const InterventionStudio = () => {
             
             <button 
               type="submit" 
-              className="w-full btn btn-primary bg-purple-600 border-purple-500 flex items-center justify-center gap-2 mt-4 py-3"
+              className="w-full btn btn-primary flex items-center justify-center gap-2 mt-4 py-3"
               disabled={loading}
             >
               {loading ? 'Evaluating...' : <><Play size={16} /> Evaluate Intervention</>}

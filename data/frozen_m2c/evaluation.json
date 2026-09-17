@@ -1,0 +1,68 @@
+{
+    "analytics_version": "M2C-FROZEN",
+    "evaluation_version": "1.1-integrity-repaired",
+    "world_seeds": [
+        42,
+        101,
+        202,
+        303,
+        404,
+        505,
+        606,
+        707,
+        808,
+        909
+    ],
+    "target_counts": {
+        "total_episodes": 546,
+        "pv_positive_events": 182,
+        "pv_threshold": ">= 0.30"
+    },
+    "models": {
+        "M0": {
+            "roc_auc": 0.5994457613329361,
+            "pr_auc": 0.003124415744954832,
+            "precision": 0.0076951057792809694,
+            "recall": 0.25166666666666665
+        },
+        "Model A": {
+            "roc_auc": 0.6772307286402749,
+            "pr_auc": 0.17521935405340314,
+            "precision": 0.32217438778971286,
+            "recall": 0.265952380952381
+        },
+        "Model A-no-shortfall": {
+            "roc_auc": 0.6812025452122369,
+            "pr_auc": 0.18120317300651118,
+            "precision": 0.228062425500596,
+            "recall": 0.253452380952381
+        },
+        "Model B": {
+            "roc_auc": 0.6850034576597952,
+            "pr_auc": 0.08859114862418094,
+            "precision": 0.005230125523012552,
+            "recall": 0.15625
+        },
+        "Model C calibrated": {
+            "roc_auc": 0.7983753545764205,
+            "pr_auc": 0.14729199788023317,
+            "precision": 0.0,
+            "recall": 0.0
+        }
+    },
+    "per_seed_variation": "\u00b10.1506 (PR-AUC)",
+    "contribution_statistics": {
+        "mean_episode_network_contribution": 0.8884939757772626,
+        "attribution_basis": "cumulative-shortfall"
+    },
+    "safeguards": {
+        "temporal_leakage_controls": "Strict timeline enforcement, minimum 4-week purge gap.",
+        "hidden_lineage_exclusion": "Modeled structural effects explicitly separated from observed outcomes.",
+        "scenario_metadata_exclusion": "Future stress metadata stripped prior to exposure modeling."
+    },
+    "results": [
+        "Model C demonstrates measurable incremental predictive value over Model B in the evaluated synthetic dataset.",
+        "The experiment does not establish that counterfactual propagation exposure improves prediction.",
+        "Results are specific to the synthetic worlds generated under the current NEXUS assumptions."
+    ]
+}

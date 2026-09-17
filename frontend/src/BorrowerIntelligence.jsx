@@ -33,8 +33,8 @@ const BorrowerIntelligence = () => {
         <h2 className="m-0">Borrower Intelligence</h2>
         <form onSubmit={fetchBorrower} className="flex gap-2">
           <input 
-            type="number" 
-            placeholder="Borrower ID (e.g. 1)" 
+            type="text" 
+            placeholder="Borrower ID (e.g. B1)" 
             value={borrowerId}
             onChange={(e) => setBorrowerId(e.target.value)}
             className="px-3 py-1 bg-black/30 border border-white/10 rounded text-white"
@@ -117,7 +117,7 @@ const BorrowerIntelligence = () => {
             </div>
             
             <div className="mt-6 flex justify-end">
-               <button className="btn btn-primary bg-blue-600 border-blue-500">
+               <button className="btn btn-primary">
                  View Group {data.group_id} Network Context
                </button>
             </div>

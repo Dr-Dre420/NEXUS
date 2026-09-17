@@ -71,34 +71,30 @@ def get_borrower(id: str):
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
     
-    # Try integer first, if it fails try string format
-    try:
-        b_id = int(id.replace('B', ''))
-    except:
-        b_id = id
+    b_id = f"B{id}" if id.isdigit() else id
         
     row = store.get_borrower_state(b_id, store.get_as_of_week())
     if row is None:
         raise HTTPException(status_code=404, detail="Borrower not found or not eligible at current week")
         
     return {
-        "borrower_id": f"B{int(row['borrower_id'])}" if isinstance(row['borrower_id'], (int, float)) else str(row['borrower_id']),
-        "group_id": f"G{int(row['group_id'])}" if isinstance(row['group_id'], (int, float)) else str(row['group_id']),
+        "borrower_id": b_id,
+        "group_id": str(row['group_id']),
         "financial_state": {
-            "cash_buffer_mean_4w": float(row.get('cash_buffer_mean_4w', 0)),
-            "weekly_income_mean_4w": float(row.get('weekly_income_mean_4w', 0)),
-            "weekly_expenses_mean_4w": float(row.get('weekly_expenses_mean_4w', 0)),
-            "current_stress": bool(row.get('current_stress', False)),
+            "cash_buffer_mean_4w": float(row['cash_buffer_mean_4w']),
+            "weekly_income_mean_4w": float(row['weekly_income_mean_4w']),
+            "weekly_expenses_mean_4w": float(row['weekly_expenses_mean_4w']),
+            "current_stress": bool(row['current_stress']),
         },
         "operational_risk": {
-            "score": float(row.get('model_c_score', 0)),
-            "baseline_score": float(row.get('model_b_score', 0)),
-            "risk_state": "High" if float(row.get('model_c_score', 0)) > 0.5 else "Moderate" if float(row.get('model_c_score', 0)) > 0.2 else "Low"
+            "score": float(row['model_c_score']),
+            "baseline_score": float(row['model_b_score']),
+            "risk_state": "High" if float(row['model_c_score']) > 0.5 else "Moderate" if float(row['model_c_score']) > 0.2 else "Low"
         },
         "network_evidence": {
-            "borrower_propagation_exposure": float(row.get('borrower_propagation_exposure', 0)),
-            "peer_stress_mean": float(row.get('peer_stress_mean_4w', 0)),
-            "borrower_liability_share": float(row.get('borrower_liability_share', 1.0))
+            "borrower_propagation_exposure": float(row['borrower_propagation_exposure']),
+            "peer_stress_mean": float(row['peer_predicted_stress_mean']),
+            "borrower_liability_share": float(row['borrower_liability_share'])
         }
     }
 
@@ -107,10 +103,7 @@ def get_group(id: str):
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
     
-    try:
-        g_id = int(id.replace('G', ''))
-    except:
-        g_id = id
+    g_id = f"G{id}" if id.isdigit() else id
         
     df = store.world_state['next_df_prop']
     as_of = store.get_as_of_week()
@@ -123,20 +116,20 @@ def get_group(id: str):
     nodes = []
     member_ids = []
     for _, row in group_members.iterrows():
-        b_id_str = f"B{int(row['borrower_id'])}" if isinstance(row['borrower_id'], (int, float)) else str(row['borrower_id'])
+        b_id_str = str(row['borrower_id'])
         member_ids.append(b_id_str)
         nodes.append({
             "id": b_id_str,
-            "group_id": f"G{int(g_id)}" if isinstance(g_id, (int, float)) else str(g_id),
+            "group_id": str(g_id),
             "current_stress": bool(row['current_stress']),
-            "operational_risk_score": float(row.get('model_c_score', 0)),
-            "borrower_propagation_exposure": float(row.get('borrower_propagation_exposure', 0)),
-            "cash_buffer_mean_4w": float(row.get('cash_buffer_mean_4w', 0)),
+            "operational_risk_score": float(row['model_c_score']),
+            "borrower_propagation_exposure": float(row['borrower_propagation_exposure']),
+            "cash_buffer_mean_4w": float(row['cash_buffer_mean_4w']),
             "liability_share": float(row['borrower_liability_share'])
         })
         
     # Central JLG group node
-    group_node_id = f"G{int(g_id)}" if isinstance(g_id, (int, float)) else str(g_id)
+    group_node_id = str(g_id)
     nodes.append({
         "id": group_node_id,
         "type": "group",
@@ -162,7 +155,7 @@ def get_group(id: str):
         "member_count": len(member_ids),
         "nodes": nodes,
         "edges": edges,
-        "aggregate_group_exposure": sum(float(row.get('borrower_propagation_exposure', 0)) for _, row in group_members.iterrows()),
+        "aggregate_group_exposure": float(group_members['borrower_propagation_exposure'].sum()),
         "group_coverage_utilization": 0.0 # Placeholder
     }
 
@@ -183,7 +176,7 @@ def get_network():
         stress_count = int(group_data['current_stress'].sum())
         member_count = len(group_data)
         result.append({
-            "group_id": f"G{int(gid)}" if isinstance(gid, (int, float)) else str(gid),
+            "group_id": str(gid),
             "aggregate_exposure": exposure,
             "member_count": member_count,
             "stressed_members": stress_count
@@ -199,10 +192,17 @@ def simulate(req: SimulationRequest):
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
         
+    if req.shock_magnitude < 0:
+        raise HTTPException(status_code=400, detail="Shock magnitude must be >= 0")
+    if not (1 <= req.shock_duration_weeks <= 52):
+        raise HTTPException(status_code=400, detail="Duration must be between 1 and 52 weeks")
+    if req.shock_type not in ["income_reduction", "expense_increase", "cash_shock"]:
+        raise HTTPException(status_code=400, detail="Unknown shock type")
+
     baseline_state = store.get_baseline_state_copy()
     scenario_state = store.get_baseline_state_copy()
     
-    b_id = req.borrower_id
+    b_id = f"B{req.borrower_id}" if req.borrower_id.isdigit() else req.borrower_id
     if b_id not in baseline_state.borrower_to_household:
         raise HTTPException(status_code=404, detail="Borrower not found in simulation state")
         
@@ -282,10 +282,15 @@ def intervene(req: InterventionRequest):
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
         
+    if req.amount < 0:
+        raise HTTPException(status_code=400, detail="Amount must be >= 0")
+    if not (1 <= req.duration_weeks <= 52):
+        raise HTTPException(status_code=400, detail="Duration must be between 1 and 52 weeks")
+
     baseline_state = store.get_baseline_state_copy()
     scenario_state = store.get_baseline_state_copy()
     
-    b_id = req.borrower_id
+    b_id = f"B{req.borrower_id}" if req.borrower_id.isdigit() else req.borrower_id
     if b_id not in baseline_state.borrower_to_household:
         raise HTTPException(status_code=404, detail="Borrower not found in simulation state")
         
@@ -373,20 +378,24 @@ def get_assumptions():
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
         
+    eval_data = store.get_evaluation_metrics()
+    conclusion = eval_data.get("final_scientific_conclusion", eval_data.get("results", [""])[0])
+    
     return {
         "world_seed": int(store.world_state['seed']),
         "generator_version": "1.0",
         "analytics_version": "M2C-FROZEN",
-        "demo_as_of_timestamp": int(store.get_as_of_week()),
+        "as_of_week": int(store.get_as_of_week()),
         "temporal_evaluation_rules": "Purge gap minimum 4 weeks strictly enforced",
         "propagation_horizon": "4-week",
         "pv_threshold": ">= 0.30",
         "attribution_basis": "cumulative-shortfall",
         "operational_risk_score_definition": "CALIBRATED MODEL C SCORE",
         "network_propagation_evidence_definition": "DIAGNOSTIC EVIDENCE",
-        "synthetic_data_disclaimer": "Results are specific to the synthetic worlds generated under the current NEXUS assumptions.",
+        "synthetic_data_disclaimer": "Results are specific to the synthetic worlds generated under the current NEXUS assumptions and should not be generalized to real microfinance populations.",
+        "m2c_conclusion": conclusion,
         "disclaimers": [
-            "Model C did not demonstrate measurable incremental predictive value over Model B in the evaluated synthetic dataset.",
-            "Network / Propagation evidence is diagnostic information only, not predictive."
+            "Network / Propagation evidence is diagnostic information only, not predictive.",
+            "This model does not establish causality between network topology and borrower stress."
         ]
     }

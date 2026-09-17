@@ -30,21 +30,14 @@ class DataStore:
         with open(mc_path, 'rb') as f:
             self.model_c = pickle.load(f)
             
-        # Reconstruct the exact WorldState at as_of_week using the generator
-        import sys
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-        from src.data import SyntheticWorldGenerator
-        from src.mechanics import step_forward
-        
-        gen = SyntheticWorldGenerator(n_borrowers=400, seed=self.world_state['seed'], slack_regime='conservative')
-        as_of = self.get_as_of_week()
-        gen.generate_world()
-        state = gen.world_state
-        
-        for w in range(as_of):
-            state, _, _ = step_forward(state)
+        baseline_path = os.path.join(data_dir, 'baseline_state.pkl')
+        with open(baseline_path, 'rb') as f:
+            self.baseline_state = pickle.load(f)
             
-        self.baseline_state = state
+        evaluation_path = os.path.join(data_dir, 'evaluation.json')
+        import json
+        with open(evaluation_path, 'r') as f:
+            self.evaluation_metrics = json.load(f)
             
         self._loaded = True
         
@@ -63,37 +56,6 @@ class DataStore:
         return copy.deepcopy(self.baseline_state)
         
     def get_evaluation_metrics(self) -> Dict[str, Any]:
-        return {
-            "model_c_features": getattr(self.model_c, 'features', []),
-            "model_b_features": getattr(self.model_b, 'features', []),
-            "target_counts": {
-                "total_episodes": 150000,
-                "pv_positive_events": 8250,
-                "pv_threshold": ">= 0.30"
-            },
-            "models": {
-                "M0": {"roc_auc": 0.652, "pr_auc": 0.184, "precision": 0.15, "recall": 0.40},
-                "Model A": {"roc_auc": 0.741, "pr_auc": 0.295, "precision": 0.22, "recall": 0.55},
-                "Model A-no-shortfall": {"roc_auc": 0.705, "pr_auc": 0.245, "precision": 0.19, "recall": 0.48},
-                "Model B": {"roc_auc": 0.783, "pr_auc": 0.342, "precision": 0.28, "recall": 0.62},
-                "Model C raw": {"roc_auc": 0.784, "pr_auc": 0.344, "precision": 0.28, "recall": 0.63},
-                "Model C calibrated": {"roc_auc": 0.783, "pr_auc": 0.342, "precision": 0.28, "recall": 0.62}
-            },
-            "per_seed_variation": "±0.005",
-            "contribution_statistics": {
-                "mean_episode_network_contribution": 0.12,
-                "attribution_basis": "cumulative-shortfall"
-            },
-            "safeguards": {
-                "temporal_leakage_controls": "Strict timeline enforcement, minimum 4-week purge gap.",
-                "hidden_lineage_exclusion": "Modeled structural effects explicitly separated from observed outcomes.",
-                "scenario_metadata_exclusion": "Future stress metadata stripped prior to exposure modeling."
-            },
-            "results": [
-                "The explicit propagation-aware exposure feature did not demonstrate measurable incremental predictive value beyond the network-context features used by Model B in the evaluated synthetic dataset.",
-                "The experiment does not establish that counterfactual propagation exposure improves prediction.",
-                "Results are specific to the synthetic worlds generated under the current NEXUS assumptions."
-            ]
-        }
+        return self.evaluation_metrics
 
 store = DataStore()

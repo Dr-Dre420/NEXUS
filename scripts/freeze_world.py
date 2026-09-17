@@ -63,6 +63,17 @@ def freeze_world(seed: int = 909):
         'as_of_week': test_df['week'].min(), # First week of test set is our "current" demo time
     }
     
+    # Generate EXACT snapshot for the product layer
+    from src.mechanics import step_forward
+    gen2 = SyntheticWorldGenerator(n_borrowers=400, seed=seed, slack_regime='conservative')
+    gen2.generate_world()
+    state = gen2.world_state
+    for _ in range(frozen_data['as_of_week']):
+        state, _, _ = step_forward(state)
+        
+    with open(os.path.join(save_dir, 'baseline_state.pkl'), 'wb') as f:
+        pickle.dump(state, f)
+    
     with open(os.path.join(save_dir, 'world_state.pkl'), 'wb') as f:
         pickle.dump(frozen_data, f)
         

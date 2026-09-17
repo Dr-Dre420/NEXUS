@@ -19,16 +19,7 @@ const CommandCenter = () => {
 
   return (
     <div className="grid grid-cols-2 gap-4">
-      <div className="glass-panel">
-        <h2 className="glass-panel-header">Predictive Risk (Model C Calibrated)</h2>
-        <div className="mt-4">
-          <div className="metric-label">Projected Next-Period Stress</div>
-          <div className="metric-value">-</div>
-          <p className="mt-4 text-sm">Operational Risk score distribution is unavailable in this endpoint slice.</p>
-        </div>
-      </div>
-      
-      <div className="glass-panel border-blue-500/30">
+      <div className="glass-panel border-l-4 border-l-blue-500 col-span-2">
         <h2 className="glass-panel-header text-blue-400">Diagnostic Network Evidence</h2>
         <div className="grid grid-cols-2 gap-4 mt-4">
           <div>

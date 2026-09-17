@@ -156,7 +156,7 @@ const NetworkIntelligence = () => {
               </div>
               <div className="text-sm text-gray-400 flex justify-between">
                 <span>Stressed: {group.stressed_members}</span>
-                <span>Exposure: {(group.aggregate_exposure * 100).toFixed(1)}%</span>
+                <span>Exposure (Sum): {group.aggregate_exposure.toFixed(2)}</span>
               </div>
             </div>
           ))}
