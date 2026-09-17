@@ -48,6 +48,7 @@ function Provenance() {
 function Shell({ children }) {
   return (
     <div className="app">
+      <div className="container" aria-hidden="true" />
       <aside className="rail">
         <div className="rail-brand">
           <div className="rail-brand-mark">NEXUS</div>

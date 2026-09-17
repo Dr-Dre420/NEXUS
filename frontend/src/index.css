@@ -54,24 +54,26 @@ html, body, #root { height: 100%; }
 html, body { max-width: 100%; overflow-x: hidden; }
 
 /* ============================ AMBIENT BACKGROUND ============================ */
-/* User-provided hexagonal gradient animation, attenuated to a subtle atmosphere
-   behind the dark analytical workspace.  Pure CSS — no React re-renders.
-   Stacking:  #root::before (effect) → #root::after (dark tint) → .app (content) */
-
-#root { position: relative; isolation: isolate; }
-
-#root::before {
-  content: "";
+.container {
+  position: absolute;
   position: fixed;
   inset: -1em;
-  z-index: -2;
+  z-index: -1;
   pointer-events: none;
-
   --c: 7px;
   background-color: #000;
-  background-image:
-    radial-gradient(circle at 50% 50%, #0000 1.5px, #000 0 var(--c), #0000 var(--c)),
-    radial-gradient(circle at 50% 50%, #0000 1.5px, #000 0 var(--c), #0000 var(--c)),
+  background-image: radial-gradient(
+      circle at 50% 50%,
+      #0000 1.5px,
+      #000 0 var(--c),
+      #0000 var(--c)
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      #0000 1.5px,
+      #000 0 var(--c),
+      #0000 var(--c)
+    ),
     radial-gradient(circle at 50% 50%, #f00, #f000 60%),
     radial-gradient(circle at 50% 50%, #ff0, #ff00 60%),
     radial-gradient(circle at 50% 50%, #0f0, #0f00 60%),
@@ -89,32 +91,22 @@ html, body { max-width: 100%; overflow-x: hidden; }
     0% 0%,
     0% 0%,
     0% 0px;
-
-  opacity: 0.07;
   animation:
-    nexus-ambient-move 40s linear infinite,
-    nexus-ambient-hue  6s linear infinite;
+    wee 40s linear infinite,
+    filt 6s linear infinite;
 }
 
-/* Dark tint overlay — crushes any remaining saturation bleed so panels and
-   text always dominate the visual hierarchy. */
-#root::after {
-  content: "";
-  position: fixed;
-  inset: -1em;
-  z-index: -1;
-  pointer-events: none;
-  background: var(--bg-app);
-  opacity: 0.55;
+@keyframes filt {
+  0% {
+    filter: hue-rotate(0deg);
+  }
+  to {
+    filter: hue-rotate(360deg);
+  }
 }
 
-@keyframes nexus-ambient-hue {
-  from { filter: hue-rotate(0deg); }
-  to   { filter: hue-rotate(360deg); }
-}
-
-@keyframes nexus-ambient-move {
-  from {
+@keyframes wee {
+  0% {
     background-position:
       var(--p),
       800% 400%,
@@ -133,7 +125,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 
 body {
-  background: var(--bg-app);
+  background: transparent;
   color: var(--text);
   font-family: var(--font);
   font-size: 14px;
@@ -155,6 +147,8 @@ body {
   display: grid;
   grid-template-columns: var(--rail-w) 1fr;
   min-height: 100vh;
+  position: relative;
+  isolation: isolate;
 }
 
 .rail {
