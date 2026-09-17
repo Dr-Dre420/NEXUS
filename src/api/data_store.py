@@ -30,21 +30,14 @@ class DataStore:
         with open(mc_path, 'rb') as f:
             self.model_c = pickle.load(f)
             
-        # Reconstruct the exact WorldState at as_of_week using the generator
-        import sys
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-        from src.data import SyntheticWorldGenerator
-        from src.mechanics import step_forward
-        
-        gen = SyntheticWorldGenerator(n_borrowers=400, seed=self.world_state['seed'], slack_regime='conservative')
-        as_of = self.get_as_of_week()
-        gen.generate_world()
-        state = gen.world_state
-        
-        for w in range(as_of):
-            state, _, _ = step_forward(state)
+        baseline_path = os.path.join(data_dir, 'baseline_state.pkl')
+        with open(baseline_path, 'rb') as f:
+            self.baseline_state = pickle.load(f)
             
-        self.baseline_state = state
+        evaluation_path = os.path.join(data_dir, 'evaluation.json')
+        import json
+        with open(evaluation_path, 'r') as f:
+            self.evaluation_metrics = json.load(f)
             
         self._loaded = True
         
@@ -63,13 +56,6 @@ class DataStore:
         return copy.deepcopy(self.baseline_state)
         
     def get_evaluation_metrics(self) -> Dict[str, Any]:
-        # We can extract the OOF predictions or standard metrics from the models if available,
-        # or compute basic metrics on the test set if needed, but since M2C frozen state
-        # is here, we just provide the basic info requested.
-        return {
-            "model_c_features": self.model_c.features if hasattr(self.model_c, 'features') else [],
-            "model_b_features": self.model_b.features if hasattr(self.model_b, 'features') else [],
-            "note": "Model C did not demonstrate measurable incremental predictive value over Model B in the evaluated synthetic dataset."
-        }
+        return self.evaluation_metrics
 
 store = DataStore()

@@ -1,56 +1,163 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Activity, Users, Share2, Waves, ActivitySquare, TestTube } from 'lucide-react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { Activity, Users, Share2, Waves, SlidersHorizontal, FlaskConical, Search } from 'lucide-react';
 import './index.css';
 
+import { api, canonicalBorrower, canonicalGroup } from './lib/api';
 import CommandCenter from './CommandCenter';
 import BorrowerIntelligence from './BorrowerIntelligence';
+import NetworkIntelligence from './NetworkIntelligence';
+import RippleSimulator from './RippleSimulator';
+import InterventionStudio from './InterventionStudio';
+import ModelImpactLab from './ModelImpactLab';
 
-// Placeholder Components
-const NetworkIntelligence = () => <div className="glass-panel"><h2>Network Intelligence</h2><p>Select a group to view network structure.</p></div>;
-const RippleSimulator = () => <div className="glass-panel"><h2>Ripple Simulator</h2><p>Select a borrower and define a shock scenario.</p></div>;
-const InterventionStudio = () => <div className="glass-panel"><h2>Intervention Studio</h2><p>No interventions applied yet.</p></div>;
-const ModelImpactLab = () => <div className="glass-panel"><h2>Model & Impact Lab</h2><p>Loading frozen M2C evaluation metrics...</p></div>;
+/* Shared selection so the six pages behave as one product: picking a borrower
+   in the Command Center carries through to Borrower, Network, Simulator and
+   Intervention Studio instead of each page starting from nothing. */
+const SelectionContext = createContext(null);
+export const useSelection = () => useContext(SelectionContext);
 
-function App() {
+const NAV = [
+  { to: '/command-center', label: 'Command Center',    icon: Activity },
+  { to: '/borrower',       label: 'Borrower Intelligence', icon: Users },
+  { to: '/network',        label: 'Network Intelligence',  icon: Share2 },
+  { to: '/simulator',      label: 'Ripple Simulator',      icon: Waves },
+  { to: '/intervene',      label: 'Intervention Studio',   icon: SlidersHorizontal },
+  { to: '/lab',            label: 'Model & Impact Lab',    icon: FlaskConical },
+];
+
+function Provenance() {
+  const [a, setA] = useState(null);
+  useEffect(() => { api.assumptions().then(setA).catch(() => setA(null)); }, []);
+  if (!a) return null;
   return (
-    <Router>
-      <div className="app-container">
-        {/* Sidebar Navigation */}
-        <aside className="sidebar">
-          <div className="sidebar-brand">
-            NEXUS
-          </div>
-          <nav className="sidebar-nav">
-            <NavLink to="/command-center" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Activity size={18} />
-              Command Center
-            </NavLink>
-            <NavLink to="/borrower" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Users size={18} />
-              Borrower Intelligence
-            </NavLink>
-            <NavLink to="/network" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Share2 size={18} />
-              Network Intelligence
-            </NavLink>
-            <NavLink to="/simulator" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Waves size={18} />
-              Ripple Simulator
-            </NavLink>
-            <NavLink to="/intervene" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <ActivitySquare size={18} />
-              Intervention Studio
-            </NavLink>
-            <NavLink to="/lab" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <TestTube size={18} />
-              Model & Impact Lab
-            </NavLink>
-          </nav>
-        </aside>
+    <div className="rail-provenance">
+      <dl>
+        <dt>World seed</dt><dd>{a.world_seed}</dd>
+        <dt>Analytics</dt><dd>{a.analytics_version}</dd>
+        <dt>As-of week</dt><dd>{a.as_of_week}</dd>
+      </dl>
+      <p className="rail-provenance-note">
+        Synthetic dataset. Scenario and model outputs are not forecasts and do not
+        generalize to real microfinance populations.
+      </p>
+    </div>
+  );
+}
 
-        {/* Main Content Area */}
-        <main className="main-content">
+function GlobalSearch() {
+  const [query, setQuery] = useState('');
+  const [error, setError] = useState(false);
+  const nav = useNavigate();
+  const { setBorrowerId, setGroupId } = useSelection();
+
+  const submit = (e) => {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+
+    const b = canonicalBorrower(q);
+    const g = canonicalGroup(q);
+
+    if (b) {
+      setBorrowerId(b);
+      setError(false);
+      setQuery('');
+      nav('/borrower');
+    } else if (g) {
+      setGroupId(g);
+      setError(false);
+      setQuery('');
+      nav('/network');
+    } else {
+      setError(true);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="rail-search" role="search">
+      <label htmlFor="global-search" className="sr-only">Global search</label>
+      <div style={{ position: 'relative' }}>
+        <Search size={13} className="rail-search-icon" aria-hidden="true" />
+        <input
+          id="global-search"
+          className="input input-mono rail-search-input"
+          placeholder="Search borrower, group, or branch..."
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setError(false); }}
+          aria-invalid={error ? 'true' : 'false'}
+        />
+      </div>
+      {error && <div className="rail-search-error">No such borrower or group found.</div>}
+    </form>
+  );
+}
+
+function SystemStatus() {
+  const [status, setStatus] = useState('checking');
+
+  useEffect(() => {
+    api.health()
+      .then((res) => {
+        if (res.status === 'ok' && res.loaded) setStatus('ok');
+        else setStatus('error');
+      })
+      .catch(() => setStatus('error'));
+  }, []);
+
+  return (
+    <div className="rail-status">
+      <span className={`status-dot status-${status}`} />
+      <span className="status-label">
+        {status === 'ok' ? 'API connected · M2C loaded' : status === 'checking' ? 'Checking system status...' : 'System offline'}
+      </span>
+    </div>
+  );
+}
+
+function Shell({ children }) {
+  return (
+    <div className="app">
+      <div className="container" aria-hidden="true" />
+      <aside className="rail">
+        <div className="rail-brand">
+          <div className="rail-brand-mark">NEXUS</div>
+          <div className="rail-brand-sub">Financial Resilience Intelligence</div>
+        </div>
+        <GlobalSearch />
+        <nav className="rail-nav" aria-label="Primary">
+          {NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `rail-link ${isActive ? 'is-active' : ''}`}
+            >
+              <Icon size={16} aria-hidden="true" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <Provenance />
+        <SystemStatus />
+      </aside>
+      <main className="main">{children}</main>
+    </div>
+  );
+}
+
+export default function App() {
+  const [borrowerId, setBorrowerId] = useState('B10');
+  const [groupId, setGroupId] = useState(null);
+
+  const selection = useMemo(
+    () => ({ borrowerId, setBorrowerId, groupId, setGroupId }),
+    [borrowerId, groupId],
+  );
+
+  return (
+    <SelectionContext.Provider value={selection}>
+      <BrowserRouter>
+        <Shell>
           <Routes>
             <Route path="/" element={<Navigate to="/command-center" replace />} />
             <Route path="/command-center" element={<CommandCenter />} />
@@ -59,11 +166,10 @@ function App() {
             <Route path="/simulator" element={<RippleSimulator />} />
             <Route path="/intervene" element={<InterventionStudio />} />
             <Route path="/lab" element={<ModelImpactLab />} />
+            <Route path="*" element={<Navigate to="/command-center" replace />} />
           </Routes>
-        </main>
-      </div>
-    </Router>
+        </Shell>
+      </BrowserRouter>
+    </SelectionContext.Provider>
   );
 }
-
-export default App;

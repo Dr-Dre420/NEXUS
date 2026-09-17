@@ -28,7 +28,8 @@ class ModelB:
         exclude_cols = [
             'borrower_id', 'group_id', 'week', 'split', 
             'current_stress', 'next_period_stress', 'propagation_vulnerability',
-            'scenario_family', 'group_covered_amount'
+            'scenario_family', 'group_covered_amount',
+            'borrower_propagation_exposure'
         ]
         
         return [c for c in X.columns if c not in exclude_cols]
