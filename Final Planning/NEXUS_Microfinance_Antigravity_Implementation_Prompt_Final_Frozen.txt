@@ -1,0 +1,618 @@
+NEXUS - FINAL ANTIGRAVITY IMPLEMENTATION PROMPT
+Financial Resilience Intelligence | M# 2026 | Final frozen pre-implementation contract
+
+READ THIS FIRST
+Use the attached NEXUS_Microfinance_PRD_Final_Clean.pdf as the canonical product and technical specification. This prompt is the implementation contract and is intentionally aligned to that PRD. Do not silently redefine target semantics, temporal rules, lineage attribution, model-score semantics, simulator mechanics, evaluation protocol, deployment constraints, or scope.
+
+PROJECT CONTEXT
+We are adapting an existing Razorpay Buildathon codebase, RippleGuard, into a completely separate M# 2026 product called NEXUS.
+M# problem statement: “When One Borrower Falls Behind” - SDG 8: Decent Work and Economic Growth.
+NEXUS must distinguish isolated difficulty, independent deterioration, and network-associated vulnerability without automatically penalizing healthy borrowers.
+
+IMPORTANT REPOSITORY RULE
+- Clone/copy RippleGuard into a separate NEXUS repo/folder.
+- Detach the copied repository from the original RippleGuard Git remote.
+- Never modify, delete, rename, or push changes to the original RippleGuard repository.
+- NEXUS must have its own Git history and remote.
+
+FIRST RESPONSE REQUIREMENT - DO NOT SKIP
+Before changing code, inspect the copied repository and the PRD.
+Your first response must:
+1. Confirm the repository path and current Git remote(s).
+2. Confirm the original RippleGuard repository is not the target of changes.
+3. Produce a concise migration map: what is reusable, what must change, what must be removed, and what must be newly added.
+4. Identify any concrete conflict between the current codebase and the PRD.
+5. Propose the implementation sequence from the dependency order below.
+Do not begin a large rewrite before this inspection.
+
+PRODUCT THESIS
+NEXUS is not “RippleGuard for microfinance.” It is a financial-resilience intelligence product built on a reusable analytical core.
+Core workflow:
+OBSERVE -> DIAGNOSE -> CONNECT -> SIMULATE -> INTERVENE -> MEASURE
+
+PRODUCT AREAS
+1. Command Center
+2. Borrower Intelligence
+3. Network Intelligence
+4. Ripple Simulator
+5. Intervention Studio
+6. Model & Impact Lab
+
+CORE ANALYTICAL PRINCIPLES
+1. Separate OBSERVED, ESTIMATED, EXPOSED, SIMULATED, and FUTURE OBSERVED quantities.
+2. Correlation is not propagation.
+3. JLG/group liability is the primary propagation channel.
+4. Default hierarchy: Branch -> Centre -> JLG -> Borrower.
+5. Pairwise borrower relationships are secondary.
+6. Healthy connected borrowers must not automatically become intervention-worthy.
+7. Simulation is deterministic, assumption-driven, and not presented as a guaranteed forecast.
+8. Model C is a hypothesis, not a guaranteed improvement over Model B.
+UI wording must never imply that an exposure estimate is a realized event or that an association constitutes a causal finding; use the epistemic label and evidence type consistently in every view.
+
+FINAL TEMPORAL CONTRACT - DO NOT CHANGE
+Current Stress:
+- Label is observed stress state at assessment time t.
+- Prediction features must use information strictly before t.
+- Same-time repayment/cash-flow evidence used to define the label cannot also be a feature.
+
+Next-Period Stress:
+- Borrower is currently non-stressed at t.
+- Label is whether stress occurs at t+1 or configured future horizon.
+- Features may use information available at or before t.
+
+Propagation Vulnerability:
+- Borrower is currently non-stressed at t.
+- Borrower later becomes stressed.
+- Hidden generator lineage indicates network contribution share >= 0.30.
+- Prediction features may use only information available at or before t.
+- Nothing observed in the interval after t and before the outcome horizon may enter prediction features.
+- Future observed outcome and hidden lineage are evaluation-only.
+
+Healthy-Borrower Protection:
+- Measure unnecessary flags / interventions among borrowers healthy at prediction time and not stressed within the evaluation horizon.
+- Break results down by exposure level.
+
+STRESS DEFINITION
+Implement a transparent operational stress definition in config/targets.yaml using observed repayment behavior and/or sustained cash-flow strain with persistence / repeated evidence.
+- Stress labels never come from NEXUS predictions.
+- Freeze target thresholds before held-out evaluation.
+
+PROPAGATION ATTRIBUTION - FIXED PRIMARY THRESHOLD
+Use:
+propagation.meaningful_contribution_share = 0.30
+Do not tune this target definition on validation.
+Report sensitivity at 0.20, 0.30, and 0.50 as a robustness analysis only.
+Scenario family labels never directly define the target. A seasonal event can produce real borrower stress; hidden lineage determines whether a specific borrower outcome is propagation-attributed.
+
+COUNTERFACTUAL LINEAGE ATTRIBUTION
+Because the synthetic world is nonlinear, estimate network contribution by deterministic same-seed/state counterfactual rerun:
+- Full world: network-transfer mechanisms enabled.
+- Counterfactual world: same seed/state with network-transfer mechanisms disabled.
+- Compute the downstream shortfall difference between the two runs.
+- Normalize that difference into a contribution share using the configured denominator.
+- Use this lineage only for evaluation / target construction.
+- NEXUS prediction code must never read hidden lineage.
+
+GENERATOR / DETECTOR / SIMULATOR SEPARATION - CRITICAL
+The financial world generator and the detector must not be self-fulfilling.
+Shared forward financial mechanics belong in src/mechanics.py.
+
+src/mechanics.py:
+- forward cash-flow rules
+- repayment / delinquency rules
+- group-liability / coverage mechanics
+- shared-income / affordability mechanics
+- contains NO hidden lineage and NO detector scoring
+
+src/data.py:
+- generates the synthetic world
+- creates scenario metadata
+- creates hidden lineage
+- may import mechanics.py
+- must NOT import detector propagation or model-scoring code
+
+src/simulator.py:
+- may import mechanics.py
+- applies shocks to cloned state
+- advances the clone using the same forward financial mechanics
+- must NOT import or read hidden lineage
+- must NOT call evaluation-only attribution functions
+
+Only evaluation / target modules may access lineage:
+- src/targets.py
+- src/evaluate.py
+Tests may inspect lineage for validation but operational prediction code must not.
+
+MANDATORY DEPENDENCY TEST
+Fail the suite if:
+- data.py imports src.propagation, src.train, or detector scoring code;
+- simulator.py imports hidden-lineage accessors or evaluation-only attribution;
+- features / graph / propagation / train / API code reads hidden lineage;
+- hidden-lineage fields appear in predictive feature matrices.
+
+DOMAIN MODEL
+Implement:
+Branch
+  -> Centre
+      -> JLG / Group
+          -> Borrowers
+
+Core entities:
+- Borrower
+- Household
+- Branch
+- Centre
+- JLG / Group
+- Loan
+- Repayment Event
+- Income Record
+- Expense / Cash-flow Record
+- External Debt
+- Relationship
+- Economic Context
+- Scenario Metadata
+- Hidden Lineage
+
+JLG / GROUP REALISM
+- Default JLG size: around 5 borrowers.
+- Centres contain multiple JLGs, roughly 15-30 borrowers as a configurable range.
+- JLG/group liability is the primary network mechanism.
+- Centre-level effects are weaker than direct JLG exposure.
+- Do not model one group-liability mechanism as dozens of equivalent borrower-borrower liability edges.
+
+MULTI-CYCLE LOANS / AFFORDABILITY
+- Borrowers support multiple loan cycles with realistic origination gaps and changing principal / instalment profiles.
+- Household affordability and multi-lender debt obligations are first-class risk context.
+- Do not pretend synthetic external debt is actual bureau data.
+
+SCENARIO FAMILIES
+seasonal_downturn
+- Regional/sector pressure affects several borrowers.
+- Recovery is possible.
+- Some group coverage may occur.
+- Per-borrower propagation attribution depends on hidden lineage.
+- Hard negative for correlation vs propagation.
+
+isolated_shock
+- One borrower receives a personal income/expense shock.
+- Connected members may cover minor shortfalls.
+- Destination borrowers should remain below the 0.30 contribution threshold.
+- Tests graph overreaction.
+
+individual_deterioration
+- Borrower-specific gradual decline over about 6+ months.
+- No meaningful network contribution.
+- Tests independent deterioration.
+
+propagating_stress
+- Source borrower loses cash buffer.
+- Shortfalls create group/connected financial burden through financial mechanics.
+- Destination borrower later deteriorates with lag.
+- Hidden lineage records the pathway and contribution share.
+
+DATA / SPLIT / STATISTICAL DESIGN
+- Simulation horizon: >= 36 months.
+- Weekly financial observations where practical.
+- Weekly or fortnightly repayment cadence; preserve exact due/payment timestamps.
+- 300-600 borrowers for primary evaluation; 200 acceptable for smoke tests.
+- 10+ WORLD-GENERATION seeds for primary evaluation; preserve per-seed results.
+- 1-2 seeds for rapid development tests.
+- Chronological train < validation < held-out test.
+- Scenario episodes must not cross boundaries.
+- Add a purge gap between splits of at least maximum propagation lag + prediction horizon.
+- Do not treat model-randomness seeds as a substitute for world-generation seeds.
+
+TARGET CONSTRUCTION ORDER - MANDATORY
+1. Generate synthetic world.
+2. Generate hidden lineage / counterfactual attribution data.
+3. Construct Current Stress, Next-Period Stress, and Propagation Vulnerability targets.
+4. Validate target independence and lineage semantics.
+5. Only then construct prediction features and train models.
+
+FEATURE PROVENANCE
+Every prediction row should be auditable with:
+- source timestamp(s)
+- source type
+- provenance flag
+- transformation / aggregation
+- model-fit window or OOF fold where a model estimate is used
+
+MODEL LADDER
+M0 - simple delinquency heuristic / recent repayment delay.
+
+A - Individual:
+- income
+- expenses
+- cash buffer
+- repayment trajectory
+- debt burden
+- seasonality
+
+B - Graph Enhanced:
+- A + pre-t JLG / group features
+- shared income-source features
+- relationship features
+- group-liability features
+
+C - Propagation Aware:
+- B + propagation exposure features built only from valid pre-t information
+- neighbor stress estimates must be OOF within training periods OR from earlier-period models
+
+PROHIBITED MODEL C STACKING
+Never do:
+Model A trained on target -> in-sample predictions on same rows -> Model C features.
+
+Each neighbor estimate used by Model C must expose provenance indicating the fit window / fold that produced it.
+
+GROUP-FIRST PROPAGATION EXPOSURE
+Build the exposure computation BEFORE Model C.
+1. Aggregate JLG/group liability into one group-level exposure signal, such as covered shortfall relative to group capacity.
+2. Pass that group exposure once to each member.
+3. Do not noisy-OR across every stressed member in a large JLG.
+4. Aggregate only across distinct semantic channels, for example:
+   - group liability
+   - shared income
+   - bilateral guarantee
+   - centre context
+
+Preferred bounded distinct-channel aggregation:
+network_vulnerability(B,t) = 1 - Product_c (1 - clipped_channel_exposure(c,B,t))
+
+Use explicit safety bounds only. Do not use hidden caps as calibration.
+
+CALIBRATION / OPERATIONAL SCORE
+- Calibrate model probabilities on validation only.
+- If network exposure is shown as probability-like, calibrate it against Propagation Vulnerability rather than treating arbitrary [0,1] numbers as equivalent.
+- Model C CALIBRATED OUTPUT is the single operational risk score.
+- Model C drives risk badges, state transitions, and recommendations.
+- The alpha decomposition is explanation-only and must not independently drive action:
+  decomposition_risk = alpha * calibrated_individual_stress + (1-alpha) * calibrated_network_exposure
+- Freeze calibration parameters, alpha, transmission factors, stress thresholds, and action thresholds before held-out testing.
+
+PATH EXTRACTION
+Path extraction / visualization is downstream of already-computed exposure states.
+It is NOT a prerequisite for Model C training.
+Represent paths with:
+- source_borrower / source_group
+- destination_borrower
+- channel
+- lag estimate
+- exposure strength
+- destination state
+- path confidence
+Path confidence is evidence strength, not causal certainty.
+
+STATE MACHINE
+Healthy -> Watch -> Vulnerable -> Stressed
+Use persistence / hysteresis to prevent UI flicker. State labels do not imply causality.
+
+RIPPLE SIMULATOR
+1. Select borrower, JLG/group, centre, shared income source, or regional source.
+2. Shock: income drop, expense surge, repayment delay, income-source loss, or regional downturn.
+3. Parameters: magnitude, duration, start period, channel, seed.
+4. Clone the baseline state; NEVER mutate the baseline.
+5. Advance the clone using src/mechanics.py - the same forward financial mechanics used by the synthetic world.
+6. NEVER read hidden lineage.
+7. Recompute observable state, then NEXUS estimates / exposure / impact.
+8. Visually distinguish direct exposure from second-order modeled exposure.
+9. Compare before/after metrics, affected borrowers, healthy borrowers affected, peak exposure, time-to-impact.
+10. Reset deterministically.
+
+The simulator is a counterfactual scenario mechanism, not a causal forecast.
+Bound request horizon / workload so serverless execution remains predictable.
+
+INTERVENTION STUDIO
+Include at least:
+- No Action
+- Monitor
+- Targeted Borrower Support
+- Temporary Repayment Flexibility
+- Restructuring
+- Group-Level Intervention
+
+Intervention effects are explicit assumptions, not learned causal effects.
+Show:
+- active assumptions
+- conservative/base/optimistic sensitivity
+- healthy borrowers affected
+- modeled group impact
+- uncertainty / caveats
+
+PRODUCT UX
+Operational default:
+- 2D network graph.
+- Fast, readable, filterable, usable on constrained devices.
+
+Showcase:
+- Optional 3D graph mode.
+- Same underlying state and filters as 2D.
+- Only implement after the core product is stable.
+
+COMMAND CENTER
+- portfolio/group health
+- emerging stress
+- stressed borrowers
+- vulnerable borrowers
+- group exposure
+- concentration/hotspots
+- scenario entry points
+
+BORROWER INTELLIGENCE
+- longitudinal income/expense/cash-flow
+- repayment timeline
+- stress decomposition
+- individual stress
+- network exposure
+- propagation vulnerability
+- Model C operational risk
+- evidence story
+- recommendation
+
+NETWORK INTELLIGENCE
+- Branch/Centre/JLG/Borrower hierarchy
+- 2D graph
+- filters
+- focus/isolate/inspect
+- path tracing
+- direct vs second-order exposure
+- healthy/watch/vulnerable/stressed state
+
+MODEL & IMPACT LAB
+- M0/A/B/C
+- PR-AUC / precision / recall as appropriate
+- calibration / reliability
+- propagation early-warning lead time
+- scenario breakdown
+- healthy-borrower impact
+- event counts
+- confidence intervals
+- per-seed results
+- honest null-result reporting
+
+EVALUATION
+Primary protocol:
+- chronological splits
+- purge gaps
+- 10+ world-generation seeds
+- scenario distribution visible
+- per-seed metrics first, aggregate second
+- confidence / bootstrap intervals where appropriate
+- event counts beside propagation metrics
+
+Metrics:
+Current Stress: precision, recall, F1, PR-AUC where appropriate.
+Next-Period Stress: PR-AUC, recall at operational precision, calibration / reliability.
+Propagation Vulnerability: PR-AUC, early-warning lead time, path-detection precision / recall where meaningful.
+Scenario robustness: seasonal_downturn, isolated_shock, individual_deterioration, propagating_stress.
+Healthy-borrower protection: false flag rate + intervention rate among healthy at t and not stressed within horizon, broken down by exposure level.
+Group impact: stress concentration, newly vulnerable members, exposure distribution.
+Ablation: M0 vs A vs B vs C on identical chronological held-out data.
+
+NULL-RESULT POLICY
+Model C is a hypothesis. If C does not improve B on held-out evaluation, report the null result honestly. Do not change split boundaries, test data, target semantics, or metric choice to manufacture an improvement.
+
+RESPONSIBLE DESIGN
+- Synthetic/demo data by default.
+- Data minimization and purpose limitation.
+- Role-based access.
+- Audit logging.
+- Low-bandwidth mode.
+- Translation-ready plain-language strings.
+- Borrower-facing explanation capability.
+- Do not expose hidden lineage in operational UI.
+- For Vercel, persistent audit logs / role state require an external persistent store or an explicit prototype stub; never rely on mutable local filesystem state.
+
+ARCHITECTURE MODULES
+src/mechanics.py
+- shared forward financial mechanics only
+- no hidden lineage
+- no detector scoring
+
+src/data.py
+- synthetic world generation
+- repeat loans
+- scenarios
+- hidden lineage
+- imports mechanics.py only among analytical modules
+
+src/features.py
+- strictly time-valid features
+- provenance
+
+src/graph.py
+- Branch/Centre/JLG hierarchy
+- relationship semantics
+- group exposure inputs
+
+src/targets.py
+- stress targets
+- propagation attribution using future outcomes + hidden lineage / counterfactuals
+- threshold/config validation
+
+src/propagation.py
+- group-first exposure computation required before Model C
+- distinct-channel aggregation
+- network vulnerability
+- path extraction may be downstream
+
+src/calibration.py
+- validation-only calibration
+
+src/simulator.py
+- cloned-state shocks
+- mechanics.py forward execution
+- deterministic recomputation
+- no lineage
+
+src/interventions.py
+- assumptions
+- counterfactual comparison
+- sensitivity
+
+src/train.py
+- M0/A/B/C
+- OOF / earlier-period neighbor estimates
+- artifact persistence
+
+src/evaluate.py
+- chronological evaluation
+- purge gaps
+- world-generation seeds
+- confidence intervals
+- scenario/fairness analysis
+- null-result reporting
+- may access lineage for evaluation only
+
+src/explain.py
+- evidence chains
+- epistemic labels
+
+src/api.py
+- FastAPI
+- typed schemas
+- stateless serving
+
+src/static/*
+- six product areas
+- 2D graph
+- optional 3D mode
+- simulator
+- intervention
+- evaluation
+
+tests/*
+- timing
+- target independence
+- lineage access restrictions
+- generator/simulator dependency boundaries
+- OOF provenance
+- group aggregation / saturation
+- calibration
+- determinism
+- fairness
+- API contracts
+- performance
+- Vercel smoke tests
+
+API ENDPOINTS
+GET /health
+GET /portfolio/summary
+GET /borrower/{id}
+GET /group/{id}
+GET /network
+POST /simulate
+POST /intervene
+GET /evaluation
+GET /assumptions
+
+IMPLEMENTATION ORDER - FINAL
+1. Inspect copied RippleGuard repository, Git remotes, and current architecture.
+2. Create/validate configs and schemas for data, targets, model, propagation, calibration, intervention, evaluation, and deployment.
+3. Implement src/mechanics.py as the shared forward financial-mechanics layer.
+4. Implement realistic synthetic world generation in src/data.py using mechanics.py; create hidden lineage separately; enforce generator/detector separation.
+5. Construct targets immediately after generation; fix primary lineage threshold at 0.30; implement counterfactual attribution.
+6. Implement target / lineage validation tests.
+7. Implement strictly time-valid feature engine + provenance + adversarial same-time tests.
+8. Implement Branch/Centre/JLG graph and group-first exposure computation.
+9. Establish chronological train/validation/test splits with purge gaps.
+10. Implement M0 and Model A.
+11. Generate OOF / earlier-period neighbor stress estimates with explicit fit-window provenance.
+12. Implement Model B and Model C.
+13. Implement validation-only calibration; freeze all test-time parameters.
+14. Run primary evaluation across 10+ world-generation seeds with CIs, scenario breakdown, fairness, event counts, ablation, and null-result reporting.
+15. Implement downstream propagation path extraction / visualization.
+16. Implement deterministic Ripple Simulator using mechanics.py on cloned state; no lineage access.
+17. Implement Intervention Studio + sensitivity.
+18. Implement explainability, epistemic labels, healthy-borrower safeguards, and borrower-facing explanation layer.
+19. Implement FastAPI and stateless serving contracts.
+20. Implement six-area UI with 2D default graph.
+21. Add 3D showcase only after core functionality is stable.
+22. Run deployment-oriented performance checks before packaging.
+23. Add / verify Vercel deployment configuration and clean production build.
+24. Run full test suite + production smoke test.
+25. Freeze metrics / assumptions; document limitations and demo path.
+26. Polish README, architecture diagram, screenshots, and M# pitch materials.
+
+CODING / ENGINEERING RULES
+- Prefer small deterministic modules over large rewrites.
+- Preserve clear boundaries between generation, mechanics, targets, features, models, propagation, simulation, API, and UI.
+- Never use hidden lineage as a predictive feature.
+- Never use scenario family or shock type as predictive input.
+- Never use future observations in prediction features.
+- Never mutate baseline state in the simulator.
+- Never retrain from a user-facing request.
+- Never add decorative controls that lack underlying logic.
+- Preserve provenance for any model-derived feature.
+- Keep test-time parameters frozen after validation.
+- Make stochastic behavior seed-controlled and reproducible.
+- Add tests alongside each analytical module rather than deferring all tests to the end.
+- Do not silently alter the PRD. Surface genuine conflicts first.
+
+DEFINITION OF DONE
+The project is NOT done because the UI looks convincing.
+It is done only when:
+- data generation is realistic and reproducible;
+- targets are independently constructed;
+- timing / leakage / stacking / lineage tests pass;
+- M0/A/B/C run on the same chronological protocol;
+- calibration and assumptions are frozen before test;
+- group-first propagation works without member-count saturation;
+- simulator is deterministic and baseline-safe;
+- intervention assumptions and sensitivity are visible;
+- healthy-borrower protection is measured;
+- all six core product areas work with real underlying logic;
+- the deployment path is tested;
+- docs explain methodology, limitations, setup, and demo flow.
+
+VERCEL DEPLOYMENT REQUIREMENT
+NEXUS must deploy as a Vercel-hosted web application without architectural rewrite.
+
+Deployment principles:
+- Frontend and FastAPI backend use Vercel-supported project configuration.
+- Training and full evaluation are offline / build-time workflows.
+- Production endpoints load frozen model / calibration artifacts.
+- Production requests are stateless.
+- Do not depend on persistent local filesystem state between invocations.
+- Persistent audit / role state must use an external persistent store or be explicitly stubbed for the prototype.
+- Keep training-only dependencies out of the serving bundle where practical.
+- Check actual deployed bundle size and function duration early.
+- Bound /simulate and /intervene workload: request horizon, node count, and computation must stay serverless-safe.
+- Load packaged / externally stored baseline artifacts rather than regenerating the entire synthetic world on each request.
+
+VERCEL ACCEPTANCE TEST
+1. Production build succeeds.
+2. Frontend loads.
+3. GET /health succeeds.
+4. Core portfolio, borrower, group, network, simulation, intervention, and evaluation endpoints return valid typed responses.
+5. Identical simulation requests are deterministic.
+6. No endpoint depends on persistent local mutation between invocations.
+7. No training-only pipeline is executed inside user-facing request paths.
+
+FINAL DESIGN STANDARD
+NEXUS should feel like a new financial-resilience product built on a reusable analytical core - not a fraud detector with microfinance labels.
+The strongest demo is one coherent evidence story:
+An emerging borrower problem is observed -> individual financial state is diagnosed -> network context is connected -> a plausible ripple is simulated using explicit assumptions -> targeted interventions are compared -> impact is measured without pretending the simulator knows the future.
+
+FINAL SCOPE CUT LINE
+CORE - must be working:
+- Command Center
+- Borrower Intelligence
+- Network Intelligence with 2D graph
+- Ripple Simulator
+- Intervention Studio
+- Model & Impact Lab
+- Analytical integrity / leakage / stacking / determinism / fairness tests
+- M0/A/B/C held-out evaluation
+- Vercel-ready stateless serving path
+
+STRETCH - only after core is stable:
+- 3D network showcase mode
+- borrower-facing portal polish
+- expanded vernacular localization
+- additional advanced scenario presets / animations
+
+CUT RULE
+If time becomes constrained, remove stretch features before compromising analytical correctness, target independence, leakage tests, evaluation, deployment reliability, or the six core product areas.
+
+FINAL INSTRUCTION TO THE AGENT
+Do not optimize for the appearance of completion. Optimize for a defensible, reproducible, working NEXUS implementation that matches the PRD.

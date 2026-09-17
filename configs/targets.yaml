@@ -1,0 +1,14 @@
+propagation:
+  meaningful_contribution_share: 0.30
+
+stress_definitions:
+  # Criteria for being considered "stressed"
+  current_stress:
+    delinquency_days_threshold: 14
+    sustained_cash_flow_strain_weeks: 4
+    buffer_depletion_ratio: 0.9  # 90% of buffer depleted
+
+temporal:
+  max_propagation_lag_weeks: 4
+  prediction_horizon_weeks: 4
+  purge_gap_weeks: 8  # max_propagation_lag_weeks + prediction_horizon_weeks

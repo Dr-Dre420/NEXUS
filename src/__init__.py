@@ -1,0 +1,3 @@
+"""
+NEXUS source code package.
+"""

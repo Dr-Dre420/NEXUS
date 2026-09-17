@@ -1,0 +1,72 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# === Virtual Environments ===
+.venv/
+venv/
+env/
+ENV/
+
+# === Environment / Secrets ===
+.env
+.env.*
+*.env
+secrets.yaml
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# === Node / Frontend ===
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+frontend/*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Logs ===
+*.log
+logs/
+
+# === OS / Editor ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# === Trained model artifacts (large binaries — store separately if needed) ===
+# Uncomment to exclude pkl files from git:
+# *.pkl
+
+# === Generated outputs / scratch ===
+# Top-level metrics and audit outputs (generated; not source)
+per_seed_metrics.csv
+per_seed_metrics.json
+final_audit.json
+audit_output.txt
+audit_output_utf8.txt
+audit_consistency.txt
+audit_consistency_utf8.txt
+
+# === Temporary / scratch scripts ===
+fix.py
+fix_consistency.py
+scratch_*.py
