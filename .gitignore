@@ -74,3 +74,4 @@ scratch_*.py
 # M2D research world caches (regenerable via research/m2d/gen_world.py)
 research/m2d/cache/
 research/m2d/__pycache__/
+research/m2d/cache_lineage/
