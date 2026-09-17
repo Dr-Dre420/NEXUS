@@ -1,126 +1,278 @@
-import React, { useState, useEffect } from 'react';
-import { Microscope, Database, ShieldCheck, AlertCircle, BarChart3, Share2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  FlaskConical, ShieldCheck, Database, BarChart3, Info, TriangleAlert, Scale,
+} from 'lucide-react';
+import { api } from './lib/api';
+import { count, indexValue, percent } from './lib/format';
+import {
+  PageHeader, Panel, SemanticBadge, DataRow, AsyncView, SkeletonPanel,
+} from './lib/ui';
 
-const ModelImpactLab = () => {
+const num = (v, dp = 3) => (Number.isFinite(v) ? v.toFixed(dp) : '—');
+
+export default function ModelImpactLab() {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [assumptions, setAssumptions] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetch('http://127.0.0.1:8000/evaluation')
-      .then(res => res.json())
-      .then(res => {
-        setData(res);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err.message);
-        setLoading(false);
-      });
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    Promise.all([api.evaluation(), api.assumptions().catch(() => null)])
+      .then(([e, a]) => { setData(e); setAssumptions(a); })
+      .catch(setError)
+      .finally(() => setLoading(false));
   }, []);
+  useEffect(load, [load]);
 
-  if (loading) return <div className="glass-panel text-gray-400 p-8">Loading frozen M2C evaluation artifacts...</div>;
-  if (error) return <div className="glass-panel text-red-400 p-8">Error: {error}</div>;
-  if (!data) return null;
+  const agg = data?.aggregate_results;
+  const seedInfo = agg?.B_PR_AUC;
+
+  // Per-seed scoreability is the heart of the honest story on this page.
+  const scoreable = useMemo(() => {
+    if (!data?.per_seed_results) return null;
+    const rows = data.per_seed_results;
+    const ok = rows.filter((r) => r.B_PR_AUC != null);
+    return {
+      total: rows.length,
+      ok: ok.length,
+      dropped: rows.filter((r) => r.B_PR_AUC == null).map((r) => r.world_seed),
+      positives: ok.reduce((a, r) => a + (r.test_positive_count || 0), 0),
+      rows,
+    };
+  }, [data]);
+
+  const identical = useMemo(() => {
+    const a = data?.prediction_identity_audit;
+    if (!a) return null;
+    return { same: a.filter((e) => e.predictions_identical).length, total: a.length };
+  }, [data]);
 
   return (
-    <div className="h-full overflow-y-auto space-y-6 pr-2">
-      <div className="glass-panel bg-gradient-to-r from-teal-900/20 to-blue-900/20 border-teal-500/20">
-        <h2 className="flex items-center gap-2 m-0 text-xl text-teal-400">
-          <Microscope size={24} />
-          Model & Impact Lab (M2C-FROZEN)
-        </h2>
-        <p className="text-gray-400 text-sm mt-2">
-          Transparency report for the final M2C analytical evaluation run across {data.target_counts.total_episodes.toLocaleString()} independent synthetic episodes.
-        </p>
-      </div>
+    <>
+      <PageHeader
+        title="Model & Impact Lab"
+        subtitle="Transparency panel for the frozen M2C evaluation. Every figure is read from the canonical evaluation artifact; nothing on this page is illustrative."
+      >
+        {data && <span className="badge badge-neutral">{data.analytics_version}</span>}
+        {data?.evaluation_version && <span className="badge badge-neutral">eval {data.evaluation_version}</span>}
+      </PageHeader>
 
-      <div className="grid grid-cols-2 gap-6">
-        
-        {/* A. MODEL COMPARISON */}
-        <div className="glass-panel">
-          <h3 className="glass-panel-header flex items-center gap-2">
-            <BarChart3 size={18} /> Model Comparison
-          </h3>
-          <div className="space-y-3 mt-4">
-            {Object.entries(data.models).map(([modelName, metrics]) => (
-              <div key={modelName} className="flex justify-between items-center p-2 rounded bg-black/30 border border-white/5">
-                <span className={`font-semibold ${modelName.includes('Model C') ? 'text-teal-400' : 'text-gray-300'}`}>{modelName}</span>
-                <div className="flex gap-4 text-xs font-mono">
-                  <span>ROC-AUC: {metrics.roc_auc.toFixed(3)}</span>
-                  <span>PR-AUC: {metrics.pr_auc.toFixed(3)}</span>
-                </div>
+      <AsyncView
+        loading={loading}
+        error={error}
+        onRetry={load}
+        skeleton={<div className="stack"><SkeletonPanel rows={2} /><div className="grid-2"><SkeletonPanel /><SkeletonPanel /></div></div>}
+      >
+        {data && (
+          <div className="stack fade-in">
+            {/* ---------------- 1. RESULT ---------------- */}
+            <Panel title="Result" icon={Scale} semantic="predictive"
+              aside={<span className="badge badge-warn">Evidence inconclusive</span>}>
+              <p style={{ fontSize: 15, lineHeight: 1.6, color: 'var(--text)' }}>
+                The evaluation does not establish that the propagation-aware exposure feature adds
+                predictive value over the network-context baseline.
+              </p>
+              <div className="callout callout-warn" style={{ marginTop: 14 }}>
+                <TriangleAlert size={15} aria-hidden="true" />
+                <span>
+                  {scoreable && (
+                    <>
+                      Only <strong>{scoreable.ok} of {scoreable.total}</strong> evaluation worlds produced a
+                      test split containing any positive cases, giving <strong>{count(scoreable.positives)} test
+                      positives in total</strong>. The remaining {scoreable.total - scoreable.ok} worlds
+                      (seeds {scoreable.dropped.join(', ')}) yield undefined metrics and are excluded from
+                      every aggregate below.
+                    </>
+                  )}
+                </span>
               </div>
-            ))}
-          </div>
-        </div>
+            </Panel>
 
-        {/* B & C. PROPAGATION EXPERIMENT & M2C RESULT */}
-        <div className="glass-panel border-l-4 border-l-teal-500">
-          <h3 className="glass-panel-header flex items-center gap-2">
-            <Share2 size={18} /> Propagation Experiment Result
-          </h3>
-          <div className="mt-4 p-4 bg-teal-900/10 rounded border border-teal-500/20 text-teal-100">
-            <h4 className="text-sm font-bold text-teal-400 mb-2 uppercase tracking-wider">Primary M2C Conclusion</h4>
-            <p className="text-sm font-semibold">{data.results[0]}</p>
-          </div>
-          <div className="mt-4 space-y-2 text-sm text-gray-400">
-            <p className="flex gap-2"><AlertCircle size={16} className="text-yellow-500 flex-shrink-0 mt-0.5" /> {data.results[1]}</p>
-            <p className="flex gap-2"><AlertCircle size={16} className="text-blue-400 flex-shrink-0 mt-0.5" /> {data.results[2]}</p>
-          </div>
-        </div>
-
-        {/* D. DATASET / EVALUATION */}
-        <div className="glass-panel">
-          <h3 className="glass-panel-header flex items-center gap-2">
-            <Database size={18} /> Dataset & Evaluation Parameters
-          </h3>
-          <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wider">Total Episodes</p>
-              <p className="text-white font-mono">{data.target_counts.total_episodes.toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wider">PV Positive Events</p>
-              <p className="text-white font-mono">{data.target_counts.pv_positive_events.toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wider">PV Threshold</p>
-              <p className="text-white font-mono">{data.target_counts.pv_threshold}</p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wider">Seed Variation</p>
-              <p className="text-white font-mono">{data.per_seed_variation}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* E & F. ATTRIBUTION & SAFEGUARDS */}
-        <div className="glass-panel">
-          <h3 className="glass-panel-header flex items-center gap-2">
-            <ShieldCheck size={18} /> Safeguards & Attribution
-          </h3>
-          <div className="space-y-4 mt-4">
-            <div className="bg-black/20 p-3 rounded">
-              <h4 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Attribution Basis</h4>
-              <p className="text-sm text-gray-200">{data.contribution_statistics.attribution_basis}</p>
-              <p className="text-xs text-teal-400 mt-1">Mean Episode Contribution: {data.contribution_statistics.mean_episode_network_contribution.toFixed(2)}</p>
-            </div>
-            
-            <div className="space-y-2">
-              <h4 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Methodological Safeguards</h4>
-              {Object.entries(data.safeguards).map(([key, val]) => (
-                <div key={key} className="text-sm">
-                  <span className="text-gray-300 font-semibold">{key.replace(/_/g, ' ')}:</span> <span className="text-gray-500">{val}</span>
+            {/* ---------------- 2. WHY ---------------- */}
+            <div className="grid-2">
+              <Panel title="Why the comparison is inconclusive" icon={Info}>
+                <div className="stack-sm">
+                  <div className="callout">
+                    <span>
+                      <strong>1. Too few positive cases.</strong> The propagation-vulnerability target is
+                      extremely rare in these synthetic worlds. A comparison resting on
+                      {scoreable ? ` ${scoreable.positives} ` : ' a handful of '}
+                      positives cannot separate a real effect from sampling noise.
+                    </span>
+                  </div>
+                  <div className="callout">
+                    <span>
+                      <strong>2. The aggregate is concentrated.</strong> Where a difference does appear, it
+                      comes from a small number of worlds rather than holding consistently across them.
+                    </span>
+                  </div>
+                  {identical && (
+                    <div className="callout">
+                      <span>
+                        <strong>3. The models often agree exactly.</strong> Model B and Model C produced
+                        identical raw predictions on <strong>{identical.same} of {identical.total}</strong> worlds,
+                        meaning the extra feature received no weight from the learner in those runs.
+                      </span>
+                    </div>
+                  )}
                 </div>
-              ))}
+              </Panel>
+
+              <Panel title="Model comparison" icon={BarChart3} semantic="predictive"
+                aside={<SemanticBadge kind="predictive" />}
+                note={seedInfo ? `Aggregated over ${seedInfo.n_seeds_contributing} of ${seedInfo.n_seeds_total} worlds — the ${seedInfo.n_seeds_dropped_no_test_positives} worlds without test positives are excluded.` : undefined}>
+                <div className="table-scroll">
+                  <table className="rank-table">
+                    <thead>
+                      <tr>
+                        <th>Model</th>
+                        <th className="num">ROC-AUC</th>
+                        <th className="num">PR-AUC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(data.models || {}).map(([name, m]) => (
+                        <tr key={name} style={{ cursor: 'default' }}>
+                          <td>{name}</td>
+                          <td className="num mono">{num(m.roc_auc)}</td>
+                          <td className="num mono">{num(m.pr_auc)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="panel-note">
+                  Model B is the network-context baseline ({data.B_feature_list?.length ?? '—'} features).
+                  Model C adds the propagation-aware exposure feature ({data.C_feature_list?.length ?? '—'} features).
+                  PR-AUC is the appropriate headline metric at this base rate; ROC-AUC is inflated by class imbalance.
+                </p>
+              </Panel>
             </div>
+
+            {/* ---------------- 3. EVIDENCE ---------------- */}
+            <Panel title="Evidence — per-world detail" icon={Database}
+              note="One row per independently generated world. Worlds with no positive test cases cannot produce a metric and are shown as unscoreable rather than as a zero.">
+              <div className="table-scroll">
+                <table className="rank-table">
+                  <thead>
+                    <tr>
+                      <th>World seed</th>
+                      <th className="num">Test positives</th>
+                      <th className="num">Model B PR-AUC</th>
+                      <th className="num">Model C PR-AUC</th>
+                      <th className="num hide-sm">Delta</th>
+                      <th className="num">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scoreable?.rows.map((r) => {
+                      const ok = r.B_PR_AUC != null;
+                      const d = r.C_raw_minus_B_PR_AUC;
+                      return (
+                        <tr key={r.world_seed} style={{ cursor: 'default' }}>
+                          <td className="mono">{r.world_seed}</td>
+                          <td className="num mono">{r.test_positive_count ?? 0}</td>
+                          <td className="num mono">{ok ? num(r.B_PR_AUC, 4) : '—'}</td>
+                          <td className="num mono">{ok ? num(r.C_raw_PR_AUC, 4) : '—'}</td>
+                          <td className="num mono hide-sm">
+                            {d == null ? '—' : (
+                              <span className={`badge ${Math.abs(d) < 1e-9 ? 'badge-neutral' : d > 0 ? 'badge-ok' : 'badge-warn'}`}>
+                                {d >= 0 ? '+' : ''}{num(d, 4)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="num">
+                            {ok ? <span className="badge badge-ok">Scoreable</span>
+                                : <span className="badge badge-neutral">No test positives</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+
+            <div className="grid-2">
+              <Panel title="Dataset & evaluation protocol" icon={Database}>
+                <DataRow label="Evaluation worlds" value={count(data.world_seeds?.length)} />
+                <DataRow label="Episode-lineage rows" value={count(data.target_counts?.total_episodes)} />
+                <DataRow label="Positive target events" value={count(data.target_counts?.pv_positive_events)} />
+                <DataRow label="Contribution threshold" value={data.target_counts?.pv_threshold} />
+                <DataRow label="Cross-world variation" value={data.per_seed_variation} />
+                {data.temporal_safeguards && (
+                  <>
+                    <DataRow label="Purge gap" value={`${data.temporal_safeguards.purge_gap_weeks} weeks`} />
+                    <DataRow label="Chronological split" value={data.temporal_safeguards.chronological_split ? 'Enforced' : 'No'} />
+                    <DataRow label="Worlds pooled for splitting" value={data.temporal_safeguards.no_global_world_concatenation ? 'No — each world split independently' : 'Yes'} />
+                  </>
+                )}
+              </Panel>
+
+              <Panel title="Safeguards & calibration" icon={ShieldCheck}>
+                {data.calibration_metadata && (
+                  <>
+                    <DataRow label="Calibrator" value={data.calibration_metadata.calibrator_type?.split(' (')[0]} />
+                    <DataRow label="Fitted on" value={data.calibration_metadata.fitted_on} />
+                    <DataRow label="Test labels used" value={data.calibration_metadata.test_labels_used ? 'Yes' : 'No'} />
+                    <DataRow label="Frozen before test" value={data.calibration_metadata.frozen_before_test ? 'Yes' : 'No'} />
+                  </>
+                )}
+                {data.leakage_checks && (
+                  <>
+                    <DataRow label="Hidden lineage in features" value={data.leakage_checks.hidden_lineage_excluded_from_features ? 'Excluded' : 'Present'} />
+                    <DataRow label="Scenario labels in features" value={data.leakage_checks.scenario_labels_excluded_from_features ? 'Excluded' : 'Present'} />
+                  </>
+                )}
+                <p className="panel-note">
+                  {data.attribution_statistics && (
+                    <>Attribution basis: {data.attribution_statistics.attribution_basis}. </>
+                  )}
+                  Hidden synthetic lineage is used for evaluation only and is never exposed through
+                  the product API or any page in this application.
+                </p>
+              </Panel>
+            </div>
+
+            {/* ---------------- 4. LIMITATIONS ---------------- */}
+            <Panel title="Limitations" icon={TriangleAlert} semantic="diagnostic">
+              <div className="stack-sm">
+                {(data.results || []).slice(1).map((r, i) => (
+                  <div key={i} className="callout callout-diagnostic">
+                    <Info size={14} aria-hidden="true" />
+                    <span>{r}</span>
+                  </div>
+                ))}
+                <div className="callout callout-warn">
+                  <TriangleAlert size={14} aria-hidden="true" />
+                  <span>
+                    All results are produced on synthetic data generated under the current NEXUS
+                    assumptions. They are specific to those assumptions, do not generalize to real
+                    microfinance populations, and establish no causal relationship between network
+                    structure and borrower stress.
+                  </span>
+                </div>
+                {assumptions?.synthetic_data_disclaimer && (
+                  <div className="callout">
+                    <Info size={14} aria-hidden="true" />
+                    <span>{assumptions.synthetic_data_disclaimer}</span>
+                  </div>
+                )}
+              </div>
+              <details style={{ marginTop: 14 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-3)' }}>
+                  Full evaluation conclusion (verbatim from the canonical artifact)
+                </summary>
+                <p className="panel-note" style={{ marginTop: 10 }}>
+                  {data.final_scientific_conclusion}
+                </p>
+              </details>
+            </Panel>
           </div>
-        </div>
-
-      </div>
-    </div>
+        )}
+      </AsyncView>
+    </>
   );
-};
-
-export default ModelImpactLab;
+}

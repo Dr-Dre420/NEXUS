@@ -499,7 +499,7 @@ def main():
 
         "temporal_safeguards": {
             "chronological_split": True,
-            "purge_gap_weeks": 4,
+            "purge_gap_weeks": 8,   # configs/targets.yaml; verified against the frozen split boundaries
             "no_future_information": True,
             "no_global_world_concatenation": True,
             "independent_per_seed_evaluation": True

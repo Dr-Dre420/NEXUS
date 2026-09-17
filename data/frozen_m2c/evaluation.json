@@ -929,7 +929,7 @@
   },
   "temporal_safeguards": {
     "chronological_split": true,
-    "purge_gap_weeks": 4,
+    "purge_gap_weeks": 8,
     "no_future_information": true,
     "no_global_world_concatenation": true,
     "independent_per_seed_evaluation": true

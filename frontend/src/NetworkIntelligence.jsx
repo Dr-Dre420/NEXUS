@@ -1,251 +1,297 @@
-import React, { useState, useEffect } from 'react';
-import { Share2, Users, AlertCircle, ShieldAlert, Activity } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Share2, Users, Info, Waves, SlidersHorizontal, MousePointerClick, Search } from 'lucide-react';
+import { api, canonicalGroup } from './lib/api';
+import { currency, probability, percentile, indexValue, percent, count } from './lib/format';
+import {
+  PageHeader, Panel, Metric, DataRow, SemanticBadge, RiskTierBadge, StressBadge,
+  AsyncView, SkeletonPanel, EmptyState, ErrorState, LoadingState,
+} from './lib/ui';
+import { useSelection } from './App';
 
-const NetworkIntelligence = () => {
-  const [network, setNetwork] = useState(null);
-  const [loadingList, setLoadingList] = useState(false);
-  const [errorList, setErrorList] = useState(null);
+const VIEW = 380;          // square viewBox; scales responsively
+const CENTER = VIEW / 2;
+const RADIUS = 122;
 
-  const [selectedGroup, setSelectedGroup] = useState(null);
-  const [groupData, setGroupData] = useState(null);
-  const [loadingGroup, setLoadingGroup] = useState(false);
-  const [errorGroup, setErrorGroup] = useState(null);
-  const [selectedNode, setSelectedNode] = useState(null);
+export default function NetworkIntelligence() {
+  const { groupId, setGroupId, setBorrowerId } = useSelection();
+  const [index, setIndex] = useState(null);
+  const [indexErr, setIndexErr] = useState(null);
+  const [filter, setFilter] = useState('');
 
-  useEffect(() => {
-    fetchNetwork();
+  const [group, setGroup] = useState(null);
+  const [groupErr, setGroupErr] = useState(null);
+  const [groupLoading, setGroupLoading] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const nav = useNavigate();
+
+  const loadIndex = useCallback(() => {
+    setIndexErr(null);
+    api.network().then(setIndex).catch(setIndexErr);
   }, []);
+  useEffect(loadIndex, [loadIndex]);
 
-  const fetchNetwork = async () => {
-    setLoadingList(true);
-    try {
-      const res = await fetch('http://127.0.0.1:8000/network');
-      if (!res.ok) throw new Error('Failed to load network index');
-      const data = await res.json();
-      setNetwork(data);
-    } catch (err) {
-      setErrorList(err.message);
-    } finally {
-      setLoadingList(false);
-    }
-  };
+  const loadGroup = useCallback((raw) => {
+    const id = canonicalGroup(raw);
+    if (!id) return;
+    setGroupId(id);
+    setGroupLoading(true);
+    setGroupErr(null);
+    setSelected(null);
+    api.group(id)
+      .then(setGroup)
+      .catch((e) => { setGroupErr(e); setGroup(null); })
+      .finally(() => setGroupLoading(false));
+  }, [setGroupId]);
 
-  const selectGroup = async (groupId) => {
-    setSelectedGroup(groupId);
-    setLoadingGroup(true);
-    setErrorGroup(null);
-    setGroupData(null);
-    setSelectedNode(null);
+  useEffect(() => { if (groupId) loadGroup(groupId); }, []); // eslint-disable-line
 
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/group/${groupId}`);
-      if (!res.ok) throw new Error('Failed to load group details');
-      const data = await res.json();
-      setGroupData(data);
-    } catch (err) {
-      setErrorGroup(err.message);
-    } finally {
-      setLoadingGroup(false);
-    }
-  };
+  const groups = useMemo(() => {
+    if (!index) return [];
+    const q = filter.trim().toUpperCase();
+    const rows = q ? index.groups.filter((g) => g.group_id.includes(q)) : index.groups;
+    return [...rows].sort((a, b) => b.aggregate_exposure - a.aggregate_exposure);
+  }, [index, filter]);
 
-  // Helper to draw circular graph
-  const renderGraph = () => {
-    if (!groupData || !groupData.nodes) return null;
+  const maxExposure = useMemo(
+    () => (index ? Math.max(...index.groups.map((g) => g.aggregate_exposure), 1e-9) : 1),
+    [index],
+  );
 
-    const radius = 100;
-    const center = { x: 150, y: 150 };
-    
-    const groupNode = groupData.nodes.find(n => n.type === 'group');
-    const borrowerNodes = groupData.nodes.filter(n => n.type !== 'group');
-    const nodesCount = borrowerNodes.length;
-    
-    // Calculate positions
-    const positionedBorrowers = borrowerNodes.map((node, i) => {
-      const angle = (i / nodesCount) * 2 * Math.PI - Math.PI / 2;
-      return {
-        ...node,
-        x: center.x + radius * Math.cos(angle),
-        y: center.y + radius * Math.sin(angle)
-      };
+  /* -------- JLG star topology: one group hub, members on a ring -------- */
+  const layout = useMemo(() => {
+    if (!group?.nodes) return null;
+    const hub = group.nodes.find((n) => n.type === 'group');
+    const members = group.nodes.filter((n) => n.type !== 'group');
+    const placed = members.map((n, i) => {
+      const a = (i / members.length) * 2 * Math.PI - Math.PI / 2;
+      return { ...n, x: CENTER + RADIUS * Math.cos(a), y: CENTER + RADIUS * Math.sin(a) };
     });
+    return { hub: hub ? { ...hub, x: CENTER, y: CENTER } : null, members: placed };
+  }, [group]);
 
-    const positionedNodes = groupNode ? [{...groupNode, x: center.x, y: center.y}, ...positionedBorrowers] : positionedBorrowers;
-
-    return (
-      <svg width="300" height="300" className="mx-auto overflow-visible">
-        {/* Draw Edges */}
-        {groupData.edges.map((edge, i) => {
-          const source = positionedNodes.find(n => n.id === edge.source);
-          const target = positionedNodes.find(n => n.id === edge.target);
-          if (!source || !target) return null;
-          return (
-            <line
-              key={`edge-${i}`}
-              x1={source.x}
-              y1={source.y}
-              x2={target.x}
-              y2={target.y}
-              stroke="rgba(255, 255, 255, 0.1)"
-              strokeWidth="2"
-            />
-          );
-        })}
-        
-        {/* Draw Nodes */}
-        {positionedNodes.map(node => {
-          const isStressed = node.current_stress;
-          const isSelected = selectedNode?.id === node.id;
-          return (
-            <g 
-              key={node.id} 
-              transform={`translate(${node.x}, ${node.y})`}
-              onClick={() => setSelectedNode(node)}
-              className="cursor-pointer transition-transform hover:scale-110"
-            >
-              <circle
-                r={node.type === 'group' ? "24" : "16"}
-                fill={node.type === 'group' ? '#1e293b' : (isStressed ? '#ef4444' : '#10b981')}
-                stroke={isSelected ? '#3b82f6' : (node.type === 'group' ? '#475569' : 'rgba(255,255,255,0.2)')}
-                strokeWidth={isSelected ? "3" : (node.type === 'group' ? "2" : "1")}
-              />
-              <text 
-                textAnchor="middle" 
-                dy=".3em" 
-                fontSize={node.type === 'group' ? "12" : "10"} 
-                fill="#fff" 
-                className="font-bold pointer-events-none"
-              >
-                {node.type === 'group' ? node.id : node.id.replace('B', '')}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-    );
-  };
+  const maxMemberExposure = useMemo(
+    () => (layout ? Math.max(...layout.members.map((m) => m.borrower_propagation_exposure), 1e-9) : 1),
+    [layout],
+  );
 
   return (
-    <div className="flex h-full gap-4">
-      {/* Sidebar: Group List */}
-      <div className="w-1/3 glass-panel flex flex-col overflow-hidden h-[calc(100vh-80px)]">
-        <h2 className="flex items-center gap-2 mb-4">
-          <Share2 size={20} className="text-blue-400" />
-          JLG Network Index
-        </h2>
-        
-        {loadingList && <p className="text-gray-400">Loading network...</p>}
-        {errorList && <p className="text-red-400">{errorList}</p>}
-        
-        <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-          {network?.groups.map(group => (
-            <div 
-              key={group.group_id}
-              onClick={() => selectGroup(group.group_id)}
-              className={`p-3 rounded border cursor-pointer transition-colors ${
-                selectedGroup === group.group_id 
-                  ? 'bg-blue-900/40 border-blue-500' 
-                  : 'bg-black/20 border-white/10 hover:bg-white/5'
-              }`}
-            >
-              <div className="flex justify-between items-center mb-1">
-                <strong className="text-white">Group {group.group_id}</strong>
-                <span className="text-xs px-2 py-1 bg-white/10 rounded">
-                  {group.member_count} members
-                </span>
-              </div>
-              <div className="text-sm text-gray-400 flex justify-between">
-                <span>Stressed: {group.stressed_members}</span>
-                <span>Exposure (Sum): {group.aggregate_exposure.toFixed(2)}</span>
-              </div>
+    <>
+      <PageHeader
+        title="Network Intelligence"
+        subtitle="Joint-liability group structure from the frozen snapshot. Borrowers are connected through their JLG, which is the modeled transmission mechanism — no borrower-to-borrower bilateral relationships are constructed or implied."
+      >
+        {group && <span className="badge badge-neutral">{group.group_id}</span>}
+        <SemanticBadge kind="diagnostic" />
+      </PageHeader>
+
+      <div className="split-index">
+        {/* ------------------------- index ------------------------- */}
+        <Panel title="JLG index" icon={Share2}
+          aside={index ? <span className="tiny text-muted">{count(groups.length)} groups</span> : null}>
+          <div className="field" style={{ marginBottom: 10 }}>
+            <label htmlFor="group-filter" className="sr-only">Filter groups</label>
+            <input id="group-filter" className="input input-mono" placeholder="Filter e.g. G2"
+              value={filter} onChange={(e) => setFilter(e.target.value)} />
+          </div>
+
+          {indexErr && <ErrorState error={indexErr} onRetry={loadIndex} title="Could not load the group index" />}
+          {!index && !indexErr && <div className="skeleton skeleton-line" style={{ height: 180 }} />}
+
+          {index && groups.length === 0 && (
+            <EmptyState icon={Search} title="No groups match" message={`Nothing matches "${filter}".`} />
+          )}
+
+          {index && groups.length > 0 && (
+            <div className="index-list">
+              {groups.map((g) => (
+                <button
+                  key={g.group_id}
+                  type="button"
+                  className={`index-item ${group?.group_id === g.group_id ? 'is-selected' : ''}`}
+                  onClick={() => loadGroup(g.group_id)}
+                  aria-pressed={group?.group_id === g.group_id}
+                >
+                  <div className="row-between">
+                    <span className="index-item-title">{g.group_id}</span>
+                    {g.stressed_members > 0
+                      ? <span className="badge badge-danger">{g.stressed_members} stressed</span>
+                      : <span className="badge badge-neutral">{g.member_count} members</span>}
+                  </div>
+                  <div className="index-item-meta">
+                    <span>Exposure (sum)</span>
+                    <span className="mono">{indexValue(g.aggregate_exposure)}</span>
+                  </div>
+                  <div className="bar-track" style={{ marginTop: 6, height: 3 }}>
+                    <div className="bar-fill is-diagnostic"
+                      style={{ width: `${(g.aggregate_exposure / maxExposure) * 100}%` }} />
+                  </div>
+                </button>
+              ))}
             </div>
-          ))}
+          )}
+        </Panel>
+
+        {/* ------------------------- detail ------------------------- */}
+        <div className="stack">
+          {!group && !groupLoading && !groupErr && (
+            <Panel>
+              <EmptyState icon={MousePointerClick} title="Select a joint-liability group"
+                message="Choose a group from the index to see its structure, member risk and diagnostic network evidence." />
+            </Panel>
+          )}
+          {groupLoading && <Panel><LoadingState label="Loading group" /></Panel>}
+          {groupErr && <Panel><ErrorState error={groupErr} onRetry={() => loadGroup(groupId)} title="Could not load that group" /></Panel>}
+
+          {group && !groupLoading && (
+            <div className="stack fade-in">
+              <div className="grid-4">
+                <div className="metric-card">
+                  <span className="metric-label">Members</span>
+                  <div className="metric-primary">{count(group.member_count)}</div>
+                </div>
+                <div className="metric-card">
+                  <span className="metric-label">Stressed members</span>
+                  <div className="metric-primary">{count(group.stressed_members)}</div>
+                  <div className="metric-sub">Observed state</div>
+                </div>
+                <div className="metric-card">
+                  <span className="metric-label">Exposure (sum)</span>
+                  <div className="metric-primary is-diagnostic">{indexValue(group.aggregate_group_exposure)}</div>
+                  <div className="metric-sub">Mean {indexValue(group.mean_group_exposure)}</div>
+                </div>
+                <div className="metric-card">
+                  <span className="metric-label">Group cash buffer</span>
+                  <div className="metric-primary">{currency(group.group_buffer_total)}</div>
+                  <div className="metric-sub">Sum of member 4w averages</div>
+                </div>
+              </div>
+
+              <Panel title={`JLG topology — ${group.group_id}`} icon={Share2} semantic="diagnostic"
+                aside={<SemanticBadge kind="diagnostic" />}
+                note="Every edge is a borrower's joint-liability relationship to the group, which is the only transmission channel modeled. Node size reflects modeled propagation exposure; node colour reflects observed stress state.">
+                <div className="graph-stage">
+                  <span className="graph-stage-label">Branch → Centre → JLG → Borrowers</span>
+                  {layout && (
+                    <svg viewBox={`0 0 ${VIEW} ${VIEW}`}
+                      style={{ width: '100%', maxWidth: 420, height: 'auto' }}
+                      role="img"
+                      aria-label={`Joint liability group ${group.group_id} with ${group.member_count} members connected to a central group node`}>
+                      {/* edges */}
+                      {layout.hub && layout.members.map((m) => {
+                        const isSel = selected?.id === m.id;
+                        return (
+                          <line key={`e-${m.id}`}
+                            x1={layout.hub.x} y1={layout.hub.y} x2={m.x} y2={m.y}
+                            stroke={isSel ? 'var(--diagnostic)' : 'rgba(148,163,184,0.22)'}
+                            strokeWidth={isSel ? 2 : 1.2} />
+                        );
+                      })}
+                      {/* hub */}
+                      {layout.hub && (
+                        <g>
+                          <circle cx={layout.hub.x} cy={layout.hub.y} r="30"
+                            fill="var(--bg-panel-2)" stroke="var(--line-strong)" strokeWidth="1.5" />
+                          <text x={layout.hub.x} y={layout.hub.y} textAnchor="middle" dy="0.35em"
+                            className="graph-node-label" fill="var(--text-2)">{group.group_id}</text>
+                        </g>
+                      )}
+                      {/* members */}
+                      {layout.members.map((m) => {
+                        const isSel = selected?.id === m.id;
+                        const r = 14 + 8 * Math.sqrt(m.borrower_propagation_exposure / maxMemberExposure || 0);
+                        return (
+                          <g key={m.id} className="graph-node" tabIndex={0} role="button"
+                            aria-label={`Borrower ${m.id}, ${m.current_stress ? 'stressed' : 'not stressed'}, risk tier ${m.risk_tier}`}
+                            onClick={() => setSelected(m)}
+                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelected(m))}>
+                            {isSel && <circle cx={m.x} cy={m.y} r={r + 6} fill="none" stroke="var(--diagnostic)" strokeWidth="1.5" opacity="0.55" />}
+                            <circle cx={m.x} cy={m.y} r={r}
+                              fill={m.current_stress ? 'rgba(240,101,111,0.9)' : 'rgba(63,191,143,0.85)'}
+                              stroke={isSel ? 'var(--diagnostic)' : 'rgba(255,255,255,0.18)'}
+                              strokeWidth={isSel ? 2.5 : 1} />
+                            <text x={m.x} y={m.y} textAnchor="middle" dy="0.35em"
+                              className="graph-node-label" fill="#08111e">{m.id.replace('B', '')}</text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  )}
+                  <div className="graph-legend">
+                    <span className="graph-legend-key">
+                      <i className="graph-legend-dot" style={{ background: 'rgba(63,191,143,0.85)' }} /> Not stressed
+                    </span>
+                    <span className="graph-legend-key">
+                      <i className="graph-legend-dot" style={{ background: 'rgba(240,101,111,0.9)' }} /> Stressed
+                    </span>
+                    <span className="graph-legend-key">Node size = modeled exposure</span>
+                  </div>
+                </div>
+              </Panel>
+
+              {/* member inspector */}
+              <Panel title={selected ? `Member detail — ${selected.id}` : 'Member detail'} icon={Users}
+                aside={selected && <StressBadge stressed={selected.current_stress} />}>
+                {!selected ? (
+                  <EmptyState icon={MousePointerClick} title="Select a borrower node"
+                    message="Choose any borrower in the topology above to inspect their predictive risk and diagnostic network evidence." />
+                ) : (
+                  <div className="stack fade-in">
+                    <div className="grid-2">
+                      <div className="nexus-panel nexus-panel--inset semantic-predictive">
+                        <div className="row-between" style={{ marginBottom: 8 }}>
+                          <span className="panel-title">Predictive</span>
+                          <SemanticBadge kind="predictive" />
+                        </div>
+                        <Metric label="Calibrated Model C probability"
+                          value={probability(selected.operational_risk_score)} semantic="predictive"
+                          sub={`Percentile rank ${percentile(selected.risk_percentile)} · tier ${selected.risk_tier}`} />
+                      </div>
+                      <div className="nexus-panel nexus-panel--inset semantic-diagnostic">
+                        <div className="row-between" style={{ marginBottom: 8 }}>
+                          <span className="panel-title">Diagnostic</span>
+                          <SemanticBadge kind="diagnostic" />
+                        </div>
+                        <Metric label="Modeled propagation exposure"
+                          value={indexValue(selected.borrower_propagation_exposure)} semantic="diagnostic"
+                          sub="Unitless index derived from joint-liability structure" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <DataRow label="Cash buffer (4w avg)" value={currency(selected.cash_buffer_mean_4w, true)} />
+                      <DataRow label="Weekly income (4w avg)" value={currency(selected.weekly_income_mean_4w, true)} />
+                      <DataRow label="Group buffer share" value={percent(selected.liability_share, 2)}
+                        hint="Share of the group's total cash buffer held by this borrower." />
+                    </div>
+
+                    <div className="action-bar">
+                      <button className="btn" onClick={() => { setBorrowerId(selected.id); nav('/borrower'); }}>
+                        <Users size={14} aria-hidden="true" /> Open dossier
+                      </button>
+                      <button className="btn" onClick={() => { setBorrowerId(selected.id); nav('/simulator'); }}>
+                        <Waves size={14} aria-hidden="true" /> Simulate shock
+                      </button>
+                      <button className="btn" onClick={() => { setBorrowerId(selected.id); nav('/intervene'); }}>
+                        <SlidersHorizontal size={14} aria-hidden="true" /> Explore intervention
+                      </button>
+                    </div>
+
+                    <div className="callout callout-diagnostic">
+                      <Info size={14} aria-hidden="true" />
+                      <span>
+                        Propagation exposure is a modeled scenario metric derived from the joint-liability
+                        structure. It does not represent observed causality between specific individuals,
+                        and no source-to-destination attribution is exposed in this product.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </Panel>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Main Content: Group Details */}
-      <div className="w-2/3 flex flex-col gap-4 h-[calc(100vh-80px)]">
-        {!selectedGroup ? (
-          <div className="glass-panel flex-1 flex items-center justify-center text-gray-400">
-            Select a group from the index to view its network structure.
-          </div>
-        ) : (
-          <>
-            {loadingGroup ? (
-              <div className="glass-panel flex-1 flex items-center justify-center">Loading group data...</div>
-            ) : errorGroup ? (
-              <div className="glass-panel flex-1 text-red-400 flex items-center justify-center">{errorGroup}</div>
-            ) : groupData ? (
-              <>
-                <div className="glass-panel h-1/2 flex items-center justify-center relative">
-                  <h3 className="absolute top-4 left-4 text-white/50 text-sm tracking-wider uppercase">JLG Topology</h3>
-                  {renderGraph()}
-                </div>
-                
-                <div className="glass-panel h-1/2 overflow-y-auto">
-                  {!selectedNode ? (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-400">
-                      <Users size={48} className="mb-4 opacity-20" />
-                      <p>Click a borrower node to inspect risk and network evidence.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center pb-2 border-b border-white/10">
-                        <h3 className="text-xl">Borrower {selectedNode.id}</h3>
-                        {selectedNode.current_stress ? (
-                          <span className="badge badge-risk-high flex items-center gap-1"><AlertCircle size={14}/> Stressed</span>
-                        ) : (
-                          <span className="badge badge-predictive flex items-center gap-1"><Activity size={14}/> Healthy</span>
-                        )}
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        {/* Predictive Block */}
-                        <div className="bg-red-900/10 border border-red-500/20 p-4 rounded">
-                          <h4 className="text-red-400 text-sm font-semibold mb-3 flex justify-between items-center">
-                            Predictive
-                            <span className="text-[10px] uppercase bg-red-500/20 px-2 py-0.5 rounded">Model C</span>
-                          </h4>
-                          <div className="text-2xl text-white mb-1">{(selectedNode.operational_risk_score * 100).toFixed(1)}%</div>
-                          <p className="text-xs text-gray-400">Calibrated Operational Risk Score</p>
-                        </div>
-                        
-                        {/* Diagnostic Block */}
-                        <div className="bg-blue-900/10 border border-blue-500/20 p-4 rounded">
-                          <h4 className="text-blue-400 text-sm font-semibold mb-3 flex justify-between items-center">
-                            Diagnostic
-                            <span className="text-[10px] uppercase bg-blue-500/20 px-2 py-0.5 rounded">Network Evidence</span>
-                          </h4>
-                          <div className="text-2xl text-white mb-1">{(selectedNode.borrower_propagation_exposure * 100).toFixed(1)}%</div>
-                          <p className="text-xs text-gray-400">Modeled Counterfactual Propagation Exposure</p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 mt-2">
-                        <div>
-                          <p className="text-xs text-gray-500 uppercase tracking-wider">Cash Buffer (4w)</p>
-                          <p className="text-white">${selectedNode.cash_buffer_mean_4w.toFixed(2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500 uppercase tracking-wider">Liability Share</p>
-                          <p className="text-white">{(selectedNode.liability_share * 100).toFixed(1)}%</p>
-                        </div>
-                      </div>
-                      
-                      <div className="mt-4 p-3 bg-black/40 rounded flex gap-3 text-sm text-gray-400 items-start">
-                        <ShieldAlert size={16} className="text-yellow-500 flex-shrink-0 mt-0.5" />
-                        <p><strong>Note:</strong> Propagation exposure is a modeled scenario metric derived from joint liability structure. It does not represent observed causality between specific individuals.</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : null}
-          </>
-        )}
-      </div>
-    </div>
+    </>
   );
-};
-
-export default NetworkIntelligence;
+}

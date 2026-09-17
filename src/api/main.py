@@ -47,24 +47,110 @@ def startup_event():
 def health_check():
     return {"status": "ok", "loaded": store._loaded}
 
+def _risk_frame():
+    """Frozen as-of cohort with descriptive percentile rank of the calibrated Model C score.
+
+    The calibrated score is extremely low-variance at this base rate, so an absolute
+    threshold cannot separate borrowers. Percentile rank is published as a DESCRIPTIVE
+    ordering statistic only; the raw probability is always returned alongside it so the
+    two are never confused.
+    """
+    df = store.world_state['next_df_prop']
+    cur = df[df['week'] == store.get_as_of_week()].copy()
+    cur['risk_percentile'] = cur['model_c_score'].rank(pct=True) * 100.0
+    return cur
+
+
+def _tier(pct: float) -> str:
+    if pct >= 95.0:
+        return "Elevated"
+    if pct >= 80.0:
+        return "Watch"
+    return "Standard"
+
+
 @app.get("/portfolio/summary")
 def get_portfolio_summary():
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
-        
-    df = store.world_state['next_df_prop']
-    as_of = store.get_as_of_week()
-    current_df = df[df['week'] == as_of]
-    
-    network_exposed_borrowers = int((current_df['borrower_propagation_exposure'] > 0).sum())
-    total_exposure = float(current_df['borrower_propagation_exposure'].sum())
-    
+
+    cur = _risk_frame()
+    n = int(len(cur))
+    score = cur['model_c_score']
+    exp = cur['borrower_propagation_exposure']
+
+    tiers = cur['risk_percentile'].apply(_tier).value_counts().to_dict()
+
+    top_risk = []
+    for _, r in cur.nlargest(8, 'model_c_score').iterrows():
+        top_risk.append({
+            "borrower_id": str(r['borrower_id']),
+            "group_id": str(r['group_id']),
+            "operational_risk_score": float(r['model_c_score']),
+            "risk_percentile": float(r['risk_percentile']),
+            "risk_tier": _tier(float(r['risk_percentile'])),
+            "borrower_propagation_exposure": float(r['borrower_propagation_exposure']),
+            "current_stress": bool(r['current_stress']),
+        })
+
+    grp = cur.groupby('group_id').agg(
+        aggregate_exposure=('borrower_propagation_exposure', 'sum'),
+        mean_exposure=('borrower_propagation_exposure', 'mean'),
+        stressed_members=('current_stress', 'sum'),
+        member_count=('borrower_id', 'size'),
+    ).reset_index()
+    top_groups = [{
+        "group_id": str(g['group_id']),
+        "aggregate_exposure": float(g['aggregate_exposure']),
+        "mean_exposure": float(g['mean_exposure']),
+        "stressed_members": int(g['stressed_members']),
+        "member_count": int(g['member_count']),
+    } for _, g in grp.nlargest(8, 'aggregate_exposure').iterrows()]
+
+    # Exposure concentration: share of total exposure held by the top decile of borrowers.
+    srt = exp.sort_values(ascending=False)
+    top_decile = float(srt.head(max(1, n // 10)).sum())
+    total_exp = float(exp.sum())
+
     return {
-        "as_of_week": int(as_of),
-        "total_eligible_borrowers": int(len(current_df)),
-        "network_exposed_borrowers": network_exposed_borrowers,
-        "aggregate_network_exposure_index": total_exposure,
+        "as_of_week": int(store.get_as_of_week()),
+        "world_seed": int(store.world_state['seed']),
+        "analytics_version": "M2C-FROZEN",
+        "total_borrowers_in_cohort": n,
+        "currently_stressed_borrowers": int(cur['current_stress'].sum()),
+
+        "operational_risk": {
+            "definition": "Calibrated Model C probability of propagation vulnerability",
+            "mean": float(score.mean()),
+            "median": float(score.median()),
+            "p90": float(score.quantile(0.90)),
+            "max": float(score.max()),
+            "distinct_values": int(score.nunique()),
+            "tier_counts": {k: int(tiers.get(k, 0)) for k in ("Elevated", "Watch", "Standard")},
+            "note": "Score variance is very low at this base rate; tiers are percentile bands, not absolute thresholds.",
+        },
+
+        "network_evidence": {
+            "definition": "Diagnostic modeled propagation exposure — not a prediction",
+            "borrowers_with_nonzero_exposure": int((exp > 0).sum()),
+            "exposure_sum": total_exp,
+            "exposure_mean": float(exp.mean()),
+            "exposure_median": float(exp.median()),
+            "exposure_max": float(exp.max()),
+            "top_decile_share_of_exposure": float(top_decile / total_exp) if total_exp > 0 else 0.0,
+            "groups_with_stressed_members": int((grp['stressed_members'] > 0).sum()),
+            "total_groups": int(len(grp)),
+        },
+
+        "risk_distribution": [
+            {"band": b, "count": int(((cur['risk_percentile'] >= lo) & (cur['risk_percentile'] < hi)).sum())}
+            for b, lo, hi in [("0-50", 0, 50), ("50-80", 50, 80), ("80-95", 80, 95), ("95-100", 95, 100.1)]
+        ],
+
+        "top_risk_borrowers": top_risk,
+        "top_exposure_groups": top_groups,
     }
+
 
 @app.get("/borrower/{id}")
 def get_borrower(id: str):
@@ -76,6 +162,10 @@ def get_borrower(id: str):
     row = store.get_borrower_state(b_id, store.get_as_of_week())
     if row is None:
         raise HTTPException(status_code=404, detail="Borrower not found or not eligible at current week")
+
+    _rf = _risk_frame()
+    _m = _rf[_rf['borrower_id'] == b_id]
+    pct = float(_m.iloc[0]['risk_percentile']) if len(_m) else 0.0
         
     return {
         "borrower_id": b_id,
@@ -84,12 +174,20 @@ def get_borrower(id: str):
             "cash_buffer_mean_4w": float(row['cash_buffer_mean_4w']),
             "weekly_income_mean_4w": float(row['weekly_income_mean_4w']),
             "weekly_expenses_mean_4w": float(row['weekly_expenses_mean_4w']),
+            "debt_burden_ratio": float(row['debt_burden_ratio']),
+            "amount_due_mean_4w": float(row['amount_due_mean_4w']),
+            "principal_remaining": float(row['principal_remaining']),
+            "days_past_due_max_4w": float(row['days_past_due_max_4w']),
+            "shortfall_mean_4w": float(row['shortfall_mean_4w']),
+            "buffer_trend_4w": float(row['buffer_trend_4w']),
             "current_stress": bool(row['current_stress']),
         },
         "operational_risk": {
             "score": float(row['model_c_score']),
             "baseline_score": float(row['model_b_score']),
-            "risk_state": "High" if float(row['model_c_score']) > 0.5 else "Moderate" if float(row['model_c_score']) > 0.2 else "Low"
+            "risk_percentile": pct,
+            "risk_tier": _tier(pct),
+            "cohort_size": int(len(_rf)),
         },
         "network_evidence": {
             "borrower_propagation_exposure": float(row['borrower_propagation_exposure']),
@@ -113,6 +211,8 @@ def get_group(id: str):
     if len(group_members) == 0:
         raise HTTPException(status_code=404, detail="Group not found or no eligible members")
         
+    _rf = _risk_frame().set_index('borrower_id')
+
     nodes = []
     member_ids = []
     for _, row in group_members.iterrows():
@@ -123,8 +223,11 @@ def get_group(id: str):
             "group_id": str(g_id),
             "current_stress": bool(row['current_stress']),
             "operational_risk_score": float(row['model_c_score']),
+            "risk_percentile": float(_rf.loc[b_id_str, 'risk_percentile']) if b_id_str in _rf.index else 0.0,
+            "risk_tier": _tier(float(_rf.loc[b_id_str, 'risk_percentile'])) if b_id_str in _rf.index else "Standard",
             "borrower_propagation_exposure": float(row['borrower_propagation_exposure']),
             "cash_buffer_mean_4w": float(row['cash_buffer_mean_4w']),
+            "weekly_income_mean_4w": float(row['weekly_income_mean_4w']),
             "liability_share": float(row['borrower_liability_share'])
         })
         
@@ -156,7 +259,9 @@ def get_group(id: str):
         "nodes": nodes,
         "edges": edges,
         "aggregate_group_exposure": float(group_members['borrower_propagation_exposure'].sum()),
-        "group_coverage_utilization": 0.0 # Placeholder
+        "mean_group_exposure": float(group_members['borrower_propagation_exposure'].mean()),
+        "stressed_members": int(group_members['current_stress'].sum()),
+        "group_buffer_total": float(group_members['cash_buffer_mean_4w'].sum()),
     }
 
 @app.get("/network")

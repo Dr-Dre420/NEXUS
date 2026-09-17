@@ -1,249 +1,317 @@
-import React, { useState } from 'react';
-import { Activity, Settings2, Play, Info, AlertTriangle } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import {
+  SlidersHorizontal, Play, Info, Users, Waves, TriangleAlert, ArrowRight,
+} from 'lucide-react';
+import { api, canonicalBorrower, ApiError } from './lib/api';
+import { currency, count } from './lib/format';
+import { toSeries, summarise, INTERVENTIONS, BOUNDS, validateScenario, moneyAxis, allZero } from './lib/scenario';
+import {
+  PageHeader, Panel, SemanticBadge, EmptyState, ErrorState, LoadingState,
+} from './lib/ui';
+import { useSelection } from './App';
 
-const InterventionStudio = () => {
-  const [borrowerId, setBorrowerId] = useState('B1');
-  const [interventionType, setInterventionType] = useState('restructure');
-  const [amount, setAmount] = useState(500);
-  const [duration, setDuration] = useState(12);
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+const tipStyle = { backgroundColor: '#121826', border: '1px solid #2a3547', borderRadius: 6, fontSize: 12 };
+
+function DeltaRow({ label, baseline, scenario, delta, betterWhenLower = true }) {
+  const improved = betterWhenLower ? delta < 0 : delta > 0;
+  const neutral = Math.abs(delta) < 1e-9;
+  return (
+    <tr>
+      <td>{label}</td>
+      <td className="num mono">{currency(baseline, true)}</td>
+      <td className="num mono">{currency(scenario, true)}</td>
+      <td className="num mono">
+        <span className={`badge ${neutral ? 'badge-neutral' : improved ? 'badge-ok' : 'badge-warn'}`}>
+          {delta >= 0 ? '+' : ''}{currency(delta, true)}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+export default function InterventionStudio() {
+  const { borrowerId, setBorrowerId } = useSelection();
+  const [form, setForm] = useState({
+    borrowerId: borrowerId || 'B10',
+    type: 'restructure',
+    amount: 500,
+    duration: 12,
+  });
+  const [errors, setErrors] = useState({});
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const nav = useNavigate();
 
-  const runIntervention = async (e) => {
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const run = useCallback(async (e) => {
     e.preventDefault();
-    if (!borrowerId) return;
+    const id = canonicalBorrower(form.borrowerId);
+    const errs = validateScenario({ borrowerId: id, magnitude: form.amount, duration: form.duration });
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://127.0.0.1:8000/intervene', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          borrower_id: borrowerId,
-          amount: Number(amount),
-          duration_weeks: Number(duration),
-          intervention_type: interventionType
-        })
+      const r = await api.intervene({
+        borrower_id: id,
+        intervention_type: form.type,
+        amount: Number(form.amount),
+        duration_weeks: Number(form.duration),
       });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || "Intervention failed");
-      }
-      const data = await res.json();
-      setResult(data);
+      setResult(r);
+      setBorrowerId(id);
     } catch (err) {
-      setError(err.message);
+      setError(err);
       setResult(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [form, setBorrowerId]);
 
-  const transformChartData = (trajectory) => {
-    return trajectory.map(week => {
-      // Aggregate peer downstream impacts
-      let peerBaselineShortfall = 0;
-      let peerScenarioShortfall = 0;
-      let peerScenarioCash = 0;
-      let peerBaselineCash = 0;
-      let peerCount = 0;
-
-      Object.values(week.group_members).forEach(member => {
-        peerBaselineShortfall += member.baseline.shortfall;
-        peerScenarioShortfall += member.scenario.shortfall;
-        peerBaselineCash += member.baseline.cash_buffer;
-        peerScenarioCash += member.scenario.cash_buffer;
-        peerCount++;
-      });
-
-      return {
-        name: `Week ${week.week}`,
-        baselineCash: week.target_borrower.baseline.cash_buffer,
-        scenarioCash: week.target_borrower.scenario.cash_buffer,
-        baselineShortfall: week.target_borrower.baseline.shortfall,
-        scenarioShortfall: week.target_borrower.scenario.shortfall,
-        baselineAmountDue: week.target_borrower.baseline.amount_due,
-        scenarioAmountDue: week.target_borrower.scenario.amount_due,
-        peerScenarioCash: peerCount > 0 ? peerScenarioCash / peerCount : 0,
-        peerBaselineCash: peerCount > 0 ? peerBaselineCash / peerCount : 0,
-      };
-    });
-  };
+  const series = useMemo(() => toSeries(result?.trajectory), [result]);
+  const summary = useMemo(() => summarise(series), [series]);
+  const dueAxis  = useMemo(() => moneyAxis(series, ['baselineDue', 'scenarioDue']), [series]);
+  const cashAxis = useMemo(() => moneyAxis(series, ['baselineCash', 'scenarioCash']), [series]);
+  const peerAxis = useMemo(() => moneyAxis(series, ['peerBaselineCash', 'peerScenarioCash']), [series]);
+  const noDue    = useMemo(() => allZero(series, ['baselineDue', 'scenarioDue']), [series]);
+  const active = INTERVENTIONS.find((i) => i.value === form.type);
+  const resultLabel = INTERVENTIONS.find((i) => i.value === result?.scenario_type)?.label || result?.scenario_type;
 
   return (
-    <div className="flex flex-col gap-4 h-full">
-      <div className="glass-panel flex items-center justify-between">
-        <h2 className="flex items-center gap-2 m-0">
-          <Activity size={20} className="text-purple-400" />
-          Intervention Studio
-        </h2>
-      </div>
+    <>
+      <PageHeader
+        title="Intervention Studio"
+        subtitle="Apply a supported intervention to one borrower and compare the modeled counterfactual against the untouched baseline over the same horizon."
+      >
+        <SemanticBadge kind="counterfactual" />
+      </PageHeader>
 
-      <div className="flex gap-4 flex-1 overflow-hidden">
-        {/* Left: Configuration Panel */}
-        <div className="w-1/3 glass-panel overflow-y-auto">
-          <h3 className="glass-panel-header text-gray-300 flex items-center gap-2">
-            <Settings2 size={16} /> Strategy Parameters
-          </h3>
-          <form onSubmit={runIntervention} className="space-y-4">
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Target Borrower ID</label>
-              <input 
-                type="text" 
-                value={borrowerId}
-                onChange={(e) => setBorrowerId(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-                placeholder="e.g. B1"
-                required
-              />
+      <div className="workspace">
+        {/* ------------------------ controls ------------------------ */}
+        <Panel title="Intervention parameters" icon={SlidersHorizontal} semantic="counterfactual">
+          <form onSubmit={run} className="stack-sm">
+            <div className="field">
+              <label className="field-label" htmlFor="int-borrower">Target borrower</label>
+              <input id="int-borrower" className="input input-mono" value={form.borrowerId}
+                onChange={set('borrowerId')} placeholder="B10"
+                aria-invalid={errors.borrowerId ? 'true' : 'false'} />
+              {errors.borrowerId && <span className="field-error">{errors.borrowerId}</span>}
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Intervention Type</label>
-              <select 
-                value={interventionType}
-                onChange={(e) => setInterventionType(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-              >
-                <option value="restructure">Restructure (Reduce Weekly Instalment)</option>
-                <option value="cash_injection">Cash Injection (Increase Buffer)</option>
-                <option value="payment_adjustment">Payment Adjustment (Reduce Principal/Amount Due)</option>
+
+            <div className="field">
+              <label className="field-label" htmlFor="int-type">Intervention</label>
+              <select id="int-type" className="select" value={form.type} onChange={set('type')}>
+                {INTERVENTIONS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
               </select>
+              <span className="field-hint">{active?.help}</span>
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Magnitude ($)</label>
-              <input 
-                type="number" 
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-                min="0"
-                required
-              />
+
+            <div className="field">
+              <label className="field-label" htmlFor="int-amount">Amount (₹)</label>
+              <input id="int-amount" className="input input-mono" type="number"
+                min={BOUNDS.magnitude.min} max={BOUNDS.magnitude.max} step={BOUNDS.magnitude.step}
+                value={form.amount} onChange={set('amount')}
+                aria-invalid={errors.magnitude ? 'true' : 'false'} />
+              {errors.magnitude
+                ? <span className="field-error">{errors.magnitude}</span>
+                : <span className="field-hint">0 – {BOUNDS.magnitude.max.toLocaleString('en-IN')}</span>}
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Evaluation Duration (Weeks)</label>
-              <input 
-                type="number" 
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-                min="1"
-                max="52"
-                required
-              />
+
+            <div className="field">
+              <label className="field-label" htmlFor="int-dur">Evaluation horizon (weeks)</label>
+              <input id="int-dur" className="input input-mono" type="number"
+                min={BOUNDS.duration.min} max={BOUNDS.duration.max}
+                value={form.duration} onChange={set('duration')}
+                aria-invalid={errors.duration ? 'true' : 'false'} />
+              {errors.duration
+                ? <span className="field-error">{errors.duration}</span>
+                : <span className="field-hint">The intervention is applied once at week 0; this is how long the outcome is observed.</span>}
             </div>
-            
-            <button 
-              type="submit" 
-              className="w-full btn btn-primary flex items-center justify-center gap-2 mt-4 py-3"
-              disabled={loading}
-            >
-              {loading ? 'Evaluating...' : <><Play size={16} /> Evaluate Intervention</>}
+
+            <button type="submit" className="btn btn-counterfactual btn-block" disabled={loading}
+              style={{ marginTop: 6 }}>
+              <Play size={14} aria-hidden="true" />
+              {loading ? 'Evaluating' : 'Evaluate intervention'}
             </button>
           </form>
 
           {error && (
-            <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 text-red-400 text-sm rounded">
-              {error}
+            <div className="callout callout-danger" style={{ marginTop: 12 }} role="alert">
+              <TriangleAlert size={14} aria-hidden="true" />
+              <span>{error instanceof ApiError ? error.message : String(error)}</span>
             </div>
           )}
-          
-          <div className="mt-6 p-3 bg-purple-900/10 border border-purple-500/20 text-purple-300 text-xs rounded flex gap-2">
-            <Info size={16} className="flex-shrink-0 mt-0.5" />
-            <p>Applies a localized structural change and computes the resulting trajectory against the frozen baseline. Avoids modifying global analytical states.</p>
+
+          <div className="callout callout-counterfactual" style={{ marginTop: 12 }}>
+            <Info size={14} aria-hidden="true" />
+            <span>
+              The intervention is applied to an isolated deep copy of the frozen baseline. Global
+              analytical state is never modified and identical inputs return identical results.
+            </span>
           </div>
-        </div>
+        </Panel>
 
-        {/* Right: Results Panel */}
-        <div className="w-2/3 flex flex-col gap-4 overflow-y-auto pr-2">
+        {/* ------------------------ results ------------------------ */}
+        <div className="stack">
+          {loading && <Panel><LoadingState label="Evaluating modeled counterfactual" /></Panel>}
+
           {!result && !loading && !error && (
-            <div className="glass-panel flex-1 flex flex-col items-center justify-center text-gray-400 h-full">
-              <Activity size={48} className="opacity-20 mb-4" />
-              <p>Configure an intervention to observe counterfactual downstream effects.</p>
-            </div>
-          )}
-          
-          {loading && (
-            <div className="glass-panel flex-1 flex items-center justify-center text-gray-400 h-full">
-              Evaluating intervention trajectory...
-            </div>
+            <Panel>
+              <EmptyState icon={SlidersHorizontal} title="No intervention evaluated yet"
+                message="Select a borrower and a supported intervention, then evaluate it to compare the modeled counterfactual against the baseline." />
+            </Panel>
           )}
 
-          {result && (
-            <>
-              <div className="glass-panel bg-gradient-to-br from-black/40 to-purple-900/10 border-purple-500/20">
-                <div className="flex justify-between items-start mb-2">
-                  <p className="text-sm text-purple-400 font-semibold flex items-center gap-2">
-                    <Activity size={16} /> Result: {result.scenario_type}
-                  </p>
-                  <span className="text-[10px] uppercase bg-purple-500/20 px-2 py-0.5 rounded text-purple-300">
-                    Modeled Counterfactual
+          {result && !loading && (
+            <div className="stack fade-in">
+              <Panel semantic="counterfactual">
+                <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <span className="metric-label">Evaluated intervention</span>
+                    <div className="metric-secondary">{resultLabel} · {result.borrower_id}</div>
+                  </div>
+                  <SemanticBadge kind="counterfactual" />
+                </div>
+                <div className="callout callout-counterfactual" style={{ marginTop: 12 }}>
+                  <Info size={14} aria-hidden="true" />
+                  <span>
+                    <strong>Modeled counterfactual under stated assumptions.</strong> This
+                    comparison describes what the deterministic model produces under these inputs. It does not
+                    establish that the intervention would produce this outcome for a real borrower, and it
+                    makes no claim about preventing default or guaranteeing recovery.
                   </span>
                 </div>
-                <p className="text-xs text-gray-300 font-semibold">{result.disclaimer}</p>
-                <div className="mt-2 text-xs text-yellow-500/80 flex items-center gap-1">
-                  <AlertTriangle size={12} />
-                  Note: This intervention demonstrates a mathematical counterfactual under stated assumptions. It does not claim causality or guarantee recovery in the real world.
-                </div>
-              </div>
+              </Panel>
 
-              <div className="grid grid-cols-1 gap-4">
-                {/* Target Borrower Amount Due */}
-                <div className="glass-panel" style={{ height: '250px' }}>
-                  <h3 className="glass-panel-header">Target Borrower: Financial Burden Trajectory (Amount Due)</h3>
-                  <ResponsiveContainer width="100%" height="85%">
-                    <AreaChart data={transformChartData(result.trajectory)} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              {/* before / modeled / delta */}
+              {summary && (
+                <Panel title="Baseline vs modeled scenario" icon={ArrowRight} semantic="counterfactual"
+                  note="Delta is modeled scenario minus baseline at the end of the horizon (cumulative for shortfall). A favourable direction is shown in green; it reflects the model's arithmetic, not a prediction about the real world.">
+                  <table className="rank-table">
+                    <thead>
+                      <tr>
+                        <th>Measure</th>
+                        <th className="num">Baseline</th>
+                        <th className="num">Modeled scenario</th>
+                        <th className="num">Delta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <DeltaRow label={`Target cash buffer · week ${summary.weeks}`}
+                        baseline={summary.cash.baseline} scenario={summary.cash.scenario}
+                        delta={summary.cash.delta} betterWhenLower={false} />
+                      <DeltaRow label="Cumulative target shortfall"
+                        baseline={summary.shortfall.baseline} scenario={summary.shortfall.scenario}
+                        delta={summary.shortfall.delta} />
+                      {summary.due && (
+                        <DeltaRow label={`Amount due · week ${summary.weeks}`}
+                          baseline={summary.due.baseline} scenario={summary.due.scenario}
+                          delta={summary.due.delta} />
+                      )}
+                      <DeltaRow label={`Avg peer cash buffer · week ${summary.weeks}`}
+                        baseline={summary.peerCash.baseline} scenario={summary.peerCash.scenario}
+                        delta={summary.peerCash.delta} betterWhenLower={false} />
+                    </tbody>
+                  </table>
+                </Panel>
+              )}
+
+              <Panel title="Target borrower — outstanding amount due" icon={SlidersHorizontal} semantic="counterfactual">
+                {noDue ? (
+                  <EmptyState icon={Info} title="No outstanding amount due in either arm"
+                    message={`This borrower carries no unpaid instalment at any point in the ${series.length}-week horizon, in the baseline or under the intervention, so there is nothing to plot. Compare the cash-buffer panels below instead.`} />
+                ) : (
+                  <>
+                  <div className="chart-frame">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={series} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
                       <defs>
-                        <linearGradient id="colorBaseline" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#94a3b8" stopOpacity={0}/>
+                        <linearGradient id="gradIntBase" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#7c8aa5" stopOpacity={0.28} />
+                          <stop offset="100%" stopColor="#7c8aa5" stopOpacity={0} />
                         </linearGradient>
-                        <linearGradient id="colorScenario" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#c084fc" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#c084fc" stopOpacity={0}/>
+                        <linearGradient id="gradIntScen" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#a97bf5" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#a97bf5" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                      <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} tickFormatter={(val) => `$${val}`} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#1e293b', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}
-                        itemStyle={{ color: '#fff' }}
-                      />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }}/>
-                      <Area type="monotone" dataKey="baselineAmountDue" name="Baseline Burden" stroke="#94a3b8" fillOpacity={1} fill="url(#colorBaseline)" />
-                      <Area type="monotone" dataKey="scenarioAmountDue" name="Intervention Burden" stroke="#c084fc" fillOpacity={1} fill="url(#colorScenario)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                      <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#1c2434' }} />
+                      <YAxis tickLine={false} axisLine={{ stroke: '#1c2434' }} tickFormatter={dueAxis} width={58} />
+                      <Tooltip contentStyle={tipStyle} formatter={(v) => currency(v, true)}
+                        labelFormatter={(l) => `Week ${String(l).replace('W', '')}`} />
+                      <Legend iconType="plainline" wrapperStyle={{ fontSize: 11.5 }} />
+                      <Area type="monotone" dataKey="baselineDue" name="Baseline"
+                        stroke="#7c8aa5" strokeWidth={1.8} fill="url(#gradIntBase)" />
+                      <Area type="monotone" dataKey="scenarioDue" name="With intervention"
+                        stroke="#a97bf5" strokeWidth={2} fill="url(#gradIntScen)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
+                <p className="chart-caption">Outstanding amount due in ₹ after each weekly collection.</p>
+                  </>
+                )}
+              </Panel>
 
-                {/* Downstream Effects: Peer Cash Buffer Drain */}
-                <div className="glass-panel" style={{ height: '250px' }}>
-                  <h3 className="glass-panel-header text-purple-400">Downstream Ripple Mitigation: Avg Peer Liquidity Preservation</h3>
-                  <ResponsiveContainer width="100%" height="85%">
-                    <LineChart data={transformChartData(result.trajectory)} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                      <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} tickFormatter={(val) => `$${val}`} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#1e293b', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}
-                      />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }}/>
-                      <Line type="monotone" dataKey="peerBaselineCash" name="Baseline Avg Peer Cash" stroke="#94a3b8" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="peerScenarioCash" name="Intervention Avg Peer Cash" stroke="#a855f7" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="grid-2">
+                <Panel title="Target cash buffer" icon={Waves} semantic="counterfactual">
+                  <div className="chart-frame chart-frame--sm">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={series} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#1c2434' }} />
+                        <YAxis tickLine={false} axisLine={{ stroke: '#1c2434' }} tickFormatter={cashAxis} width={58} />
+                        <Tooltip contentStyle={tipStyle} formatter={(v) => currency(v, true)} />
+                        <Legend iconType="plainline" wrapperStyle={{ fontSize: 11.5 }} />
+                        <Line type="monotone" dataKey="baselineCash" name="Baseline" stroke="#7c8aa5" strokeWidth={1.8} dot={false} />
+                        <Line type="monotone" dataKey="scenarioCash" name="With intervention" stroke="#a97bf5" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Panel>
+
+                <Panel title="Average peer cash buffer" icon={Users} semantic="counterfactual">
+                  <div className="chart-frame chart-frame--sm">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={series} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#1c2434' }} />
+                        <YAxis tickLine={false} axisLine={{ stroke: '#1c2434' }} tickFormatter={peerAxis} width={58} />
+                        <Tooltip contentStyle={tipStyle} formatter={(v) => currency(v, true)} />
+                        <Legend iconType="plainline" wrapperStyle={{ fontSize: 11.5 }} />
+                        <Line type="monotone" dataKey="peerBaselineCash" name="Baseline" stroke="#7c8aa5" strokeWidth={1.8} dot={false} />
+                        <Line type="monotone" dataKey="peerScenarioCash" name="With intervention" stroke="#a97bf5" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="chart-caption">
+                    Modeled effect on the rest of the joint-liability group over the same horizon.
+                  </p>
+                </Panel>
               </div>
-            </>
+
+              <Panel>
+                <div className="action-bar">
+                  <button className="btn" onClick={() => { setBorrowerId(result.borrower_id); nav('/simulator'); }}>
+                    <Waves size={14} aria-hidden="true" /> Back to shock scenario
+                  </button>
+                  <button className="btn" onClick={() => { setBorrowerId(result.borrower_id); nav('/lab'); }}>
+                    How is this evaluated?
+                  </button>
+                </div>
+              </Panel>
+            </div>
           )}
         </div>
       </div>
-    </div>
+    </>
   );
-};
-
-export default InterventionStudio;
+}

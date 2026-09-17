@@ -30,10 +30,58 @@ def test_portfolio_summary():
     response = client.get("/portfolio/summary")
     assert response.status_code == 200
     data = response.json()
-    assert "as_of_week" in data
-    assert "total_eligible_borrowers" in data
-    assert isinstance(data["as_of_week"], int)
-    assert isinstance(data["total_eligible_borrowers"], int)
+    assert data["as_of_week"] == 127
+    assert data["world_seed"] == 909
+    assert isinstance(data["total_borrowers_in_cohort"], int)
+    assert data["total_borrowers_in_cohort"] > 0
+
+    # Predictive and diagnostic blocks must stay separate in the contract.
+    risk, net = data["operational_risk"], data["network_evidence"]
+    for k in ("mean", "median", "max", "distinct_values", "tier_counts"):
+        assert k in risk
+    for k in ("exposure_sum", "exposure_mean", "exposure_median", "top_decile_share_of_exposure"):
+        assert k in net
+
+    # Risk bands must partition the cohort exactly - no double counting.
+    assert sum(b["count"] for b in data["risk_distribution"]) == data["total_borrowers_in_cohort"]
+    assert sum(risk["tier_counts"].values()) == data["total_borrowers_in_cohort"]
+
+    # Action-area rows must be drillable: every id must resolve on its own endpoint.
+    assert len(data["top_risk_borrowers"]) > 0
+    top = data["top_risk_borrowers"][0]
+    assert client.get(f"/borrower/{top['borrower_id']}").status_code == 200
+    assert client.get(f"/group/{top['group_id']}").status_code == 200
+    assert 0.0 <= top["risk_percentile"] <= 100.0
+    assert len(data["top_exposure_groups"]) > 0
+    assert client.get(f"/group/{data['top_exposure_groups'][0]['group_id']}").status_code == 200
+
+
+def test_portfolio_summary_has_no_misleading_denominator():
+    """The audit flagged 'total_eligible_borrowers' as an unearned denominator."""
+    data = client.get("/portfolio/summary").json()
+    assert "total_eligible_borrowers" not in data
+
+
+def test_borrower_percentile_is_not_the_probability():
+    """A percentile rank and a probability are different quantities."""
+    r = client.get("/borrower/B10")
+    assert r.status_code == 200
+    risk = r.json()["operational_risk"]
+    assert 0.0 <= risk["score"] <= 1.0
+    assert 0.0 <= risk["risk_percentile"] <= 100.0
+    assert risk["risk_tier"] in ("Elevated", "Watch", "Standard")
+    assert risk["cohort_size"] > 0
+
+
+def test_group_exposes_no_placeholder_fields():
+    """group_coverage_utilization was a hardcoded 0.0 placeholder."""
+    data = client.get("/group/G2").json()
+    assert "group_coverage_utilization" not in data
+    assert data["stressed_members"] >= 0
+    assert data["member_count"] == len([n for n in data["nodes"] if n.get("type") != "group"])
+    for node in data["nodes"]:
+        if node.get("type") != "group":
+            assert 0.0 <= node["risk_percentile"] <= 100.0
 
 
 # 3. Valid borrower returns 200 (canonical string ID)

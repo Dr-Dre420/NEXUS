@@ -1,131 +1,218 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Search, Wallet, Gauge, Share2, Waves, SlidersHorizontal, Users, Info, UserSearch,
+} from 'lucide-react';
+import { api, canonicalBorrower } from './lib/api';
+import { currency, probability, percentile, indexValue, percent, count } from './lib/format';
+import {
+  PageHeader, Panel, Metric, DataRow, SemanticBadge, RiskTierBadge, StressBadge,
+  AsyncView, SkeletonPanel, EmptyState, Bar,
+} from './lib/ui';
+import { useSelection } from './App';
 
-const BorrowerIntelligence = () => {
-  const [borrowerId, setBorrowerId] = useState('');
+export default function BorrowerIntelligence() {
+  const { borrowerId, setBorrowerId, setGroupId } = useSelection();
+  const [query, setQuery] = useState(borrowerId || 'B10');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [invalid, setInvalid] = useState(null);
+  const nav = useNavigate();
 
-  const fetchBorrower = async (e) => {
-    e.preventDefault();
-    if (!borrowerId) return;
+  const load = useCallback((raw) => {
+    const id = canonicalBorrower(raw);
+    if (!id) {
+      setInvalid('Enter a borrower id in the form B10 (or just the number 10).');
+      return;
+    }
+    setInvalid(null);
     setLoading(true);
     setError(null);
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/borrower/${borrowerId}`);
-      if (!res.ok) {
-        if (res.status === 404) throw new Error("Borrower not found or not eligible at current week");
-        throw new Error("API Error");
-      }
-      const json = await res.json();
-      setData(json);
-    } catch (err) {
-      setError(err.message);
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+    api.borrower(id)
+      .then((d) => { setData(d); setBorrowerId(d.borrower_id); setQuery(d.borrower_id); })
+      .catch((e) => { setError(e); setData(null); })
+      .finally(() => setLoading(false));
+  }, [setBorrowerId]);
+
+  // Load whatever the rest of the product has selected.
+  useEffect(() => { if (borrowerId) load(borrowerId); }, []); // eslint-disable-line
+
+  const submit = (e) => { e.preventDefault(); load(query); };
+
+  const fin = data?.financial_state;
+  const risk = data?.operational_risk;
+  const netv = data?.network_evidence;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="glass-panel flex items-center justify-between">
-        <h2 className="m-0">Borrower Intelligence</h2>
-        <form onSubmit={fetchBorrower} className="flex gap-2">
-          <input 
-            type="text" 
-            placeholder="Borrower ID (e.g. B1)" 
-            value={borrowerId}
-            onChange={(e) => setBorrowerId(e.target.value)}
-            className="px-3 py-1 bg-black/30 border border-white/10 rounded text-white"
+    <>
+      <PageHeader
+        title="Borrower Intelligence"
+        subtitle="Borrower dossier from the frozen snapshot: observed financial state, predictive operational risk, and diagnostic network evidence, kept visually distinct."
+      >
+        <form onSubmit={submit} className="row" role="search">
+          <label htmlFor="borrower-id" className="sr-only">Borrower identifier</label>
+          <input
+            id="borrower-id"
+            className="input input-mono"
+            style={{ width: 150 }}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="B10"
+            aria-invalid={invalid ? 'true' : 'false'}
+            aria-describedby={invalid ? 'borrower-id-error' : undefined}
           />
           <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? 'Searching...' : 'Inspect'}
+            <Search size={14} aria-hidden="true" />
+            {loading ? 'Loading' : 'Inspect'}
           </button>
         </form>
-      </div>
+      </PageHeader>
 
-      {error && (
-        <div className="glass-panel text-red-400">
-          <p>{error}</p>
-        </div>
-      )}
+      {invalid && <p id="borrower-id-error" className="field-error" style={{ marginBottom: 12 }}>{invalid}</p>}
 
-      {!data && !error && !loading && (
-        <div className="glass-panel text-center py-8 text-gray-400">
-          <p>Enter a Borrower ID to view risk and network evidence.</p>
-        </div>
-      )}
-
-      {data && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="glass-panel">
-            <h3 className="glass-panel-header text-emerald-400">Financial State</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="metric-label">Cash Buffer (4w)</div>
-                <div className="metric-value">${data.financial_state.cash_buffer_mean_4w.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="metric-label">Avg Income (4w)</div>
-                <div className="metric-value">${data.financial_state.weekly_income_mean_4w.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="metric-label">Avg Expenses (4w)</div>
-                <div className="metric-value">${data.financial_state.weekly_expenses_mean_4w.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="metric-label">Current Status</div>
-                <div className="mt-2">
-                  {data.financial_state.current_stress ? 
-                    <span className="badge badge-risk-high">Stressed</span> : 
-                    <span className="badge badge-predictive">Healthy</span>}
+      <AsyncView
+        loading={loading}
+        error={error}
+        onRetry={() => load(query)}
+        empty={!data && !loading && !error}
+        emptyProps={{
+          icon: UserSearch,
+          title: 'No borrower selected',
+          message: 'Enter a borrower identifier such as B10, or pick one from the Command Center risk table.',
+        }}
+        skeleton={<div className="grid-2"><SkeletonPanel /><SkeletonPanel /></div>}
+      >
+        {data && (
+          <div className="stack fade-in">
+            {/* identity strip */}
+            <Panel>
+              <div className="row-between" style={{ flexWrap: 'wrap' }}>
+                <div className="row-wrap">
+                  <div>
+                    <span className="metric-label">Borrower</span>
+                    <div className="metric-secondary">{data.borrower_id}</div>
+                  </div>
+                  <div style={{ marginLeft: 22 }}>
+                    <span className="metric-label">Joint-liability group</span>
+                    <div className="metric-secondary">
+                      <button className="link-cell" style={{ fontSize: 17 }}
+                        onClick={() => { setGroupId(data.group_id); nav('/network'); }}>
+                        {data.group_id}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ marginLeft: 22 }}>
+                    <span className="metric-label">Observed state</span>
+                    <div style={{ marginTop: 7 }}><StressBadge stressed={fin.current_stress} /></div>
+                  </div>
+                </div>
+                <div className="action-bar">
+                  <button className="btn" onClick={() => { setGroupId(data.group_id); nav('/network'); }}>
+                    <Share2 size={14} aria-hidden="true" /> View network
+                  </button>
+                  <button className="btn" onClick={() => { setBorrowerId(data.borrower_id); nav('/simulator'); }}>
+                    <Waves size={14} aria-hidden="true" /> Simulate shock
+                  </button>
+                  <button className="btn" onClick={() => { setBorrowerId(data.borrower_id); nav('/intervene'); }}>
+                    <SlidersHorizontal size={14} aria-hidden="true" /> Explore intervention
+                  </button>
                 </div>
               </div>
-            </div>
-          </div>
+            </Panel>
 
-          <div className="glass-panel">
-            <h3 className="glass-panel-header text-red-400 flex justify-between">
-              Operational Risk
-              <span className="badge badge-predictive">Predictive</span>
-            </h3>
-            <div>
-              <div className="metric-label">Calibrated Model C Score</div>
-              <div className="metric-value text-red-400">
-                {(data.operational_risk.score * 100).toFixed(2)}%
-              </div>
-              <p className="mt-2 text-sm text-gray-400">Baseline Context Score (Model B): {(data.operational_risk.baseline_score * 100).toFixed(2)}%</p>
-            </div>
-          </div>
+            <div className="grid-2">
+              {/* ---------------- financial state ---------------- */}
+              <Panel title="Financial state" icon={Wallet}
+                aside={<span className="badge badge-neutral">Observed</span>}
+                note="Observed values from the frozen snapshot, averaged over the trailing 4 weeks where indicated. These are recorded facts about the synthetic world, not model output.">
+                <div className="grid-2" style={{ gap: 14 }}>
+                  <Metric label="Cash buffer (4w avg)" value={currency(fin.cash_buffer_mean_4w, true)} />
+                  <Metric label="Weekly income (4w avg)" value={currency(fin.weekly_income_mean_4w, true)} />
+                </div>
+                <div style={{ marginTop: 16 }}>
+                  <DataRow label="Weekly expenses (4w avg)" value={currency(fin.weekly_expenses_mean_4w, true)} />
+                  <DataRow label="Amount due (4w avg)" value={currency(fin.amount_due_mean_4w, true)} />
+                  <DataRow label="Principal remaining" value={currency(fin.principal_remaining, true)} />
+                  <DataRow label="Debt burden ratio" value={fin.debt_burden_ratio.toFixed(4)}
+                    hint="Amount due relative to income over the feature window." />
+                  <DataRow label="Days past due (4w max)" value={count(fin.days_past_due_max_4w)} />
+                  <DataRow label="Shortfall (4w avg)" value={currency(fin.shortfall_mean_4w, true)} />
+                  <DataRow label="Buffer trend (4w)" value={currency(fin.buffer_trend_4w, true)}
+                    hint="Change in cash buffer across the trailing window." />
+                </div>
+              </Panel>
 
-          <div className="glass-panel col-span-2 border-blue-500/30">
-            <h3 className="glass-panel-header text-blue-400 flex justify-between">
-              Network / Propagation Evidence
-              <span className="badge badge-diagnostic">Diagnostic</span>
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="metric-label text-blue-400">Modeled Propagation Exposure</div>
-                <div className="metric-value">{(data.network_evidence.borrower_propagation_exposure * 100).toFixed(2)}%</div>
-                <p className="text-xs text-blue-300 mt-1">Counterfactual exposure (not a causal guarantee)</p>
-              </div>
-              <div>
-                <div className="metric-label text-blue-400">Peer Stress Mean (4w)</div>
-                <div className="metric-value">{(data.network_evidence.peer_stress_mean * 100).toFixed(2)}%</div>
-              </div>
+              {/* ---------------- operational risk ---------------- */}
+              <Panel title="Operational risk" icon={Gauge} semantic="predictive"
+                aside={<SemanticBadge kind="predictive" />}
+                note="This is the only predictive quantity on this page. It is the calibrated Model C probability of propagation vulnerability within the evaluation horizon. It is not a statement that this borrower will default.">
+                <Metric
+                  label="Calibrated Model C probability"
+                  value={probability(risk.score)}
+                  semantic="predictive"
+                  sub={`Model B comparison baseline: ${probability(risk.baseline_score)}`}
+                />
+                <div style={{ marginTop: 16 }}>
+                  <div className="row-between" style={{ marginBottom: 6 }}>
+                    <span className="metric-label">Percentile rank in cohort</span>
+                    <RiskTierBadge tier={risk.risk_tier} />
+                  </div>
+                  <Bar value={risk.risk_percentile} max={100} semantic="predictive"
+                    label={`Percentile ${risk.risk_percentile.toFixed(1)} of 100`} />
+                  <div className="metric-sub">
+                    Rank {percentile(risk.risk_percentile)} of 100 among {count(risk.cohort_size)} borrowers.
+                    A percentile is an ordering statistic — it is not a probability and the two are
+                    not interchangeable.
+                  </div>
+                </div>
+                <div className="callout callout-warn" style={{ marginTop: 14 }}>
+                  <Info size={14} aria-hidden="true" />
+                  <span>
+                    Calibrated scores are tightly clustered at this base rate, so the percentile is a
+                    coarse ordering. Read the probability as the quantity of record.
+                  </span>
+                </div>
+              </Panel>
             </div>
-            
-            <div className="mt-6 flex justify-end">
-               <button className="btn btn-primary">
-                 View Group {data.group_id} Network Context
-               </button>
-            </div>
+
+            {/* ---------------- network evidence ---------------- */}
+            <Panel title="Network / propagation evidence" icon={Share2} semantic="diagnostic"
+              aside={<SemanticBadge kind="diagnostic" />}
+              note="Diagnostic evidence only. These quantities describe the borrower's position in the joint-liability structure. They are not predictions, and they do not assert that any specific peer caused or will cause this borrower's stress.">
+              <div className="grid-3">
+                <Metric
+                  label="Modeled propagation exposure"
+                  value={indexValue(netv.borrower_propagation_exposure)}
+                  semantic="diagnostic"
+                  sub="Unitless index. Counterfactual construct, not an observed transfer."
+                />
+                <Metric
+                  label="Peer predicted stress (mean)"
+                  value={probability(netv.peer_stress_mean)}
+                  semantic="diagnostic"
+                  sub="Mean modeled stress probability across the other members of this group."
+                />
+                <Metric
+                  label="Group buffer share"
+                  value={percent(netv.borrower_liability_share, 2)}
+                  semantic="diagnostic"
+                  sub="This borrower's cash buffer as a share of the group total. A relative liquidity measure, not a contractual liability percentage."
+                />
+              </div>
+              <div className="callout callout-diagnostic" style={{ marginTop: 16 }}>
+                <Info size={14} aria-hidden="true" />
+                <span>
+                  Propagation exposure is derived from modeled peer stress and group liquidity
+                  structure. It indicates where joint-liability transmission capacity exists — it
+                  does not represent observed causality between named individuals, and no borrower-to-borrower
+                  attribution is exposed anywhere in this product.
+                </span>
+              </div>
+            </Panel>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </AsyncView>
+    </>
   );
-};
-
-export default BorrowerIntelligence;
+}

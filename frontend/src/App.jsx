@@ -1,8 +1,9 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Activity, Users, Share2, Waves, ActivitySquare, TestTube } from 'lucide-react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { Activity, Users, Share2, Waves, SlidersHorizontal, FlaskConical } from 'lucide-react';
 import './index.css';
 
+import { api } from './lib/api';
 import CommandCenter from './CommandCenter';
 import BorrowerIntelligence from './BorrowerIntelligence';
 import NetworkIntelligence from './NetworkIntelligence';
@@ -10,48 +11,80 @@ import RippleSimulator from './RippleSimulator';
 import InterventionStudio from './InterventionStudio';
 import ModelImpactLab from './ModelImpactLab';
 
-// No placeholder components remaining
+/* Shared selection so the six pages behave as one product: picking a borrower
+   in the Command Center carries through to Borrower, Network, Simulator and
+   Intervention Studio instead of each page starting from nothing. */
+const SelectionContext = createContext(null);
+export const useSelection = () => useContext(SelectionContext);
 
+const NAV = [
+  { to: '/command-center', label: 'Command Center',    icon: Activity },
+  { to: '/borrower',       label: 'Borrower Intelligence', icon: Users },
+  { to: '/network',        label: 'Network Intelligence',  icon: Share2 },
+  { to: '/simulator',      label: 'Ripple Simulator',      icon: Waves },
+  { to: '/intervene',      label: 'Intervention Studio',   icon: SlidersHorizontal },
+  { to: '/lab',            label: 'Model & Impact Lab',    icon: FlaskConical },
+];
 
-function App() {
+function Provenance() {
+  const [a, setA] = useState(null);
+  useEffect(() => { api.assumptions().then(setA).catch(() => setA(null)); }, []);
+  if (!a) return null;
   return (
-    <Router>
-      <div className="app-container">
-        {/* Sidebar Navigation */}
-        <aside className="sidebar">
-          <div className="sidebar-brand">
-            NEXUS
-          </div>
-          <nav className="sidebar-nav">
-            <NavLink to="/command-center" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Activity size={18} />
-              Command Center
-            </NavLink>
-            <NavLink to="/borrower" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Users size={18} />
-              Borrower Intelligence
-            </NavLink>
-            <NavLink to="/network" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Share2 size={18} />
-              Network Intelligence
-            </NavLink>
-            <NavLink to="/simulator" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Waves size={18} />
-              Ripple Simulator
-            </NavLink>
-            <NavLink to="/intervene" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <ActivitySquare size={18} />
-              Intervention Studio
-            </NavLink>
-            <NavLink to="/lab" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <TestTube size={18} />
-              Model & Impact Lab
-            </NavLink>
-          </nav>
-        </aside>
+    <div className="rail-provenance">
+      <dl>
+        <dt>World seed</dt><dd>{a.world_seed}</dd>
+        <dt>Analytics</dt><dd>{a.analytics_version}</dd>
+        <dt>As-of week</dt><dd>{a.as_of_week}</dd>
+      </dl>
+      <p className="rail-provenance-note">
+        Synthetic dataset. Scenario and model outputs are not forecasts and do not
+        generalize to real microfinance populations.
+      </p>
+    </div>
+  );
+}
 
-        {/* Main Content Area */}
-        <main className="main-content">
+function Shell({ children }) {
+  return (
+    <div className="app">
+      <aside className="rail">
+        <div className="rail-brand">
+          <div className="rail-brand-mark">NEXUS</div>
+          <div className="rail-brand-sub">Financial Resilience Intelligence</div>
+        </div>
+        <nav className="rail-nav" aria-label="Primary">
+          {NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `rail-link ${isActive ? 'is-active' : ''}`}
+            >
+              <Icon size={16} aria-hidden="true" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <Provenance />
+      </aside>
+      <main className="main">{children}</main>
+    </div>
+  );
+}
+
+export default function App() {
+  const [borrowerId, setBorrowerId] = useState('B10');
+  const [groupId, setGroupId] = useState(null);
+
+  const selection = useMemo(
+    () => ({ borrowerId, setBorrowerId, groupId, setGroupId }),
+    [borrowerId, groupId],
+  );
+
+  return (
+    <SelectionContext.Provider value={selection}>
+      <BrowserRouter>
+        <Shell>
           <Routes>
             <Route path="/" element={<Navigate to="/command-center" replace />} />
             <Route path="/command-center" element={<CommandCenter />} />
@@ -60,11 +93,10 @@ function App() {
             <Route path="/simulator" element={<RippleSimulator />} />
             <Route path="/intervene" element={<InterventionStudio />} />
             <Route path="/lab" element={<ModelImpactLab />} />
+            <Route path="*" element={<Navigate to="/command-center" replace />} />
           </Routes>
-        </main>
-      </div>
-    </Router>
+        </Shell>
+      </BrowserRouter>
+    </SelectionContext.Provider>
   );
 }
-
-export default App;

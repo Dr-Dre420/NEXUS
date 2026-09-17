@@ -1,239 +1,295 @@
-import React, { useState } from 'react';
-import { Waves, Settings2, Play, Info } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import { Waves, Play, Info, SlidersHorizontal, Users, TriangleAlert } from 'lucide-react';
+import { api, canonicalBorrower, ApiError } from './lib/api';
+import { currency, count } from './lib/format';
+import { toSeries, summarise, SHOCK_TYPES, BOUNDS, validateScenario, moneyAxis, allZero } from './lib/scenario';
+import {
+  PageHeader, Panel, SemanticBadge, EmptyState, ErrorState, LoadingState, DataRow,
+} from './lib/ui';
+import { useSelection } from './App';
 
-const RippleSimulator = () => {
-  const [borrowerId, setBorrowerId] = useState('B1');
-  const [shockType, setShockType] = useState('income_reduction');
-  const [magnitude, setMagnitude] = useState(500);
-  const [duration, setDuration] = useState(12);
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+const tipStyle = {
+  backgroundColor: '#121826', border: '1px solid #2a3547',
+  borderRadius: 6, fontSize: 12,
+};
+
+export default function RippleSimulator() {
+  const { borrowerId, setBorrowerId } = useSelection();
+  const [form, setForm] = useState({
+    borrowerId: borrowerId || 'B10',
+    shockType: 'income_reduction',
+    magnitude: 500,
+    duration: 12,
+  });
+  const [errors, setErrors] = useState({});
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const nav = useNavigate();
 
-  const runSimulation = async (e) => {
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const run = useCallback(async (e) => {
     e.preventDefault();
-    if (!borrowerId) return;
+    const id = canonicalBorrower(form.borrowerId);
+    const errs = validateScenario({ borrowerId: id, magnitude: form.magnitude, duration: form.duration });
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://127.0.0.1:8000/simulate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          borrower_id: borrowerId,
-          shock_magnitude: Number(magnitude),
-          shock_duration_weeks: Number(duration),
-          shock_type: shockType
-        })
+      const r = await api.simulate({
+        borrower_id: id,
+        shock_magnitude: Number(form.magnitude),
+        shock_duration_weeks: Number(form.duration),
+        shock_type: form.shockType,
       });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || "Simulation failed");
-      }
-      const data = await res.json();
-      setResult(data);
+      setResult(r);
+      setBorrowerId(id);
     } catch (err) {
-      setError(err.message);
-      setResult(null);
+      setError(err);
+      setResult(null);          // never leave a stale scenario on screen
     } finally {
       setLoading(false);
     }
-  };
+  }, [form, setBorrowerId]);
 
-  const transformChartData = (trajectory) => {
-    return trajectory.map(week => {
-      // Aggregate peer downstream impacts
-      let peerBaselineShortfall = 0;
-      let peerScenarioShortfall = 0;
-      let peerScenarioCash = 0;
-      let peerBaselineCash = 0;
-      let peerCount = 0;
-
-      Object.values(week.group_members).forEach(member => {
-        peerBaselineShortfall += member.baseline.shortfall;
-        peerScenarioShortfall += member.scenario.shortfall;
-        peerBaselineCash += member.baseline.cash_buffer;
-        peerScenarioCash += member.scenario.cash_buffer;
-        peerCount++;
-      });
-
-      return {
-        name: `Week ${week.week}`,
-        baselineCash: week.target_borrower.baseline.cash_buffer,
-        scenarioCash: week.target_borrower.scenario.cash_buffer,
-        baselineShortfall: week.target_borrower.baseline.shortfall,
-        scenarioShortfall: week.target_borrower.scenario.shortfall,
-        peerScenarioCash: peerCount > 0 ? peerScenarioCash / peerCount : 0,
-        peerBaselineCash: peerCount > 0 ? peerBaselineCash / peerCount : 0,
-      };
-    });
-  };
+  const series = useMemo(() => toSeries(result?.trajectory), [result]);
+  const summary = useMemo(() => summarise(series), [series]);
+  const cashAxis = useMemo(() => moneyAxis(series, ['baselineCash', 'scenarioCash']), [series]);
+  const peerAxis = useMemo(() => moneyAxis(series, ['peerBaselineCash', 'peerScenarioCash']), [series]);
+  const sfAxis   = useMemo(() => moneyAxis(series, ['baselineShortfall', 'scenarioShortfall']), [series]);
+  const noShortfall = useMemo(() => allZero(series, ['baselineShortfall', 'scenarioShortfall']), [series]);
+  const shockHelp = SHOCK_TYPES.find((s) => s.value === form.shockType)?.help;
 
   return (
-    <div className="flex flex-col gap-4 h-full">
-      <div className="glass-panel flex items-center justify-between">
-        <h2 className="flex items-center gap-2 m-0">
-          <Waves size={20} className="text-teal-400" />
-          Deterministic Ripple Simulator
-        </h2>
-      </div>
+    <>
+      <PageHeader
+        title="Ripple Simulator"
+        subtitle="Apply a hypothetical shock to one borrower and trace the modeled effect on that borrower and on the rest of their joint-liability group, against an unshocked baseline."
+      >
+        <SemanticBadge kind="counterfactual" />
+      </PageHeader>
 
-      <div className="flex gap-4 flex-1 overflow-hidden">
-        {/* Left: Configuration Panel */}
-        <div className="w-1/3 glass-panel overflow-y-auto">
-          <h3 className="glass-panel-header text-gray-300 flex items-center gap-2">
-            <Settings2 size={16} /> Scenario Parameters
-          </h3>
-          <form onSubmit={runSimulation} className="space-y-4">
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Target Borrower ID</label>
-              <input 
-                type="text" 
-                value={borrowerId}
-                onChange={(e) => setBorrowerId(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-                placeholder="e.g. B1"
-                required
-              />
+      <div className="workspace">
+        {/* ------------------------ controls ------------------------ */}
+        <Panel title="Scenario parameters" icon={SlidersHorizontal} semantic="counterfactual">
+          <form onSubmit={run} className="stack-sm">
+            <div className="field">
+              <label className="field-label" htmlFor="sim-borrower">Target borrower</label>
+              <input id="sim-borrower" className="input input-mono" value={form.borrowerId}
+                onChange={set('borrowerId')} placeholder="B10"
+                aria-invalid={errors.borrowerId ? 'true' : 'false'} />
+              {errors.borrowerId && <span className="field-error">{errors.borrowerId}</span>}
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Shock Type</label>
-              <select 
-                value={shockType}
-                onChange={(e) => setShockType(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-              >
-                <option value="income_reduction">Income Reduction (Weekly)</option>
-                <option value="expense_increase">Expense Increase (Weekly)</option>
-                <option value="cash_shock">Immediate Cash Shock</option>
+
+            <div className="field">
+              <label className="field-label" htmlFor="sim-type">Shock type</label>
+              <select id="sim-type" className="select" value={form.shockType} onChange={set('shockType')}>
+                {SHOCK_TYPES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
+              <span className="field-hint">{shockHelp}</span>
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Magnitude ($)</label>
-              <input 
-                type="number" 
-                value={magnitude}
-                onChange={(e) => setMagnitude(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-                min="0"
-                required
-              />
+
+            <div className="field">
+              <label className="field-label" htmlFor="sim-mag">Magnitude (₹)</label>
+              <input id="sim-mag" className="input input-mono" type="number"
+                min={BOUNDS.magnitude.min} max={BOUNDS.magnitude.max} step={BOUNDS.magnitude.step}
+                value={form.magnitude} onChange={set('magnitude')}
+                aria-invalid={errors.magnitude ? 'true' : 'false'} />
+              {errors.magnitude
+                ? <span className="field-error">{errors.magnitude}</span>
+                : <span className="field-hint">0 – {BOUNDS.magnitude.max.toLocaleString('en-IN')}</span>}
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-gray-400 mb-1">Duration (Weeks)</label>
-              <input 
-                type="number" 
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded text-white"
-                min="1"
-                max="52"
-                required
-              />
+
+            <div className="field">
+              <label className="field-label" htmlFor="sim-dur">Horizon (weeks)</label>
+              <input id="sim-dur" className="input input-mono" type="number"
+                min={BOUNDS.duration.min} max={BOUNDS.duration.max}
+                value={form.duration} onChange={set('duration')}
+                aria-invalid={errors.duration ? 'true' : 'false'} />
+              {errors.duration
+                ? <span className="field-error">{errors.duration}</span>
+                : <span className="field-hint">{BOUNDS.duration.min} – {BOUNDS.duration.max} weeks</span>}
             </div>
-            
-            <button 
-              type="submit" 
-              className="w-full btn btn-primary bg-teal-600 border-teal-500 flex items-center justify-center gap-2 mt-4 py-3"
-              disabled={loading}
-            >
-              {loading ? 'Simulating...' : <><Play size={16} /> Run Simulation</>}
+
+            <button type="submit" className="btn btn-counterfactual btn-block" disabled={loading}
+              style={{ marginTop: 6 }}>
+              <Play size={14} aria-hidden="true" />
+              {loading ? 'Running scenario' : 'Run scenario'}
             </button>
           </form>
 
           {error && (
-            <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 text-red-400 text-sm rounded">
-              {error}
+            <div className="callout callout-danger" style={{ marginTop: 12 }} role="alert">
+              <TriangleAlert size={14} aria-hidden="true" />
+              <span>{error instanceof ApiError ? error.message : String(error)}</span>
             </div>
           )}
-          
-          <div className="mt-6 p-3 bg-blue-900/10 border border-blue-500/20 text-blue-300 text-xs rounded flex gap-2">
-            <Info size={16} className="flex-shrink-0 mt-0.5" />
-            <p>Runs identical deterministic simulation mechanics on a deep-copy of the frozen baseline to trace scenario delta effects.</p>
+
+          <div className="callout callout-counterfactual" style={{ marginTop: 12 }}>
+            <Info size={14} aria-hidden="true" />
+            <span>
+              Both arms run identical deterministic mechanics on independent deep copies of the
+              frozen baseline. The baseline state is never mutated, and repeating a scenario with
+              the same inputs returns the same result.
+            </span>
           </div>
-        </div>
+        </Panel>
 
-        {/* Right: Results Panel */}
-        <div className="w-2/3 flex flex-col gap-4 overflow-y-auto pr-2">
+        {/* ------------------------ results ------------------------ */}
+        <div className="stack">
+          {loading && <Panel><LoadingState label="Running deterministic scenario" /></Panel>}
+
           {!result && !loading && !error && (
-            <div className="glass-panel flex-1 flex flex-col items-center justify-center text-gray-400 h-full">
-              <Waves size={48} className="opacity-20 mb-4" />
-              <p>Configure and run a shock scenario to view downstream ripple effects.</p>
-            </div>
-          )}
-          
-          {loading && (
-            <div className="glass-panel flex-1 flex items-center justify-center text-gray-400 h-full">
-              Running deterministic simulation...
-            </div>
+            <Panel>
+              <EmptyState icon={Waves} title="No scenario run yet"
+                message="Choose a borrower, configure a shock and run the scenario to see the modeled trajectory against the unshocked baseline." />
+            </Panel>
           )}
 
-          {result && (
-            <>
-              <div className="glass-panel bg-gradient-to-br from-black/40 to-teal-900/10 border-teal-500/20">
-                <p className="text-sm text-teal-400 mb-1 font-semibold flex items-center gap-2">
-                  <Waves size={16} /> Result: {result.scenario_type}
-                </p>
-                <p className="text-xs text-gray-400">{result.disclaimer}</p>
-              </div>
+          {result && !loading && (
+            <div className="stack fade-in">
+              <Panel semantic="counterfactual">
+                <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <span className="metric-label">Scenario</span>
+                    <div className="metric-secondary">
+                      {SHOCK_TYPES.find((s) => s.value === result.scenario_type)?.label || result.scenario_type}
+                      {' · '}{result.borrower_id}
+                    </div>
+                  </div>
+                  <SemanticBadge kind="counterfactual" />
+                </div>
+                <div className="callout callout-counterfactual" style={{ marginTop: 12 }}>
+                  <Info size={14} aria-hidden="true" />
+                  <span><strong>Scenario simulation — not a guaranteed forecast.</strong> Outputs are modeled downstream effects under strict deterministic assumptions.</span>
+                </div>
+              </Panel>
 
-              <div className="grid grid-cols-1 gap-4">
-                {/* Target Borrower Cash Buffer */}
-                <div className="glass-panel" style={{ height: '300px' }}>
-                  <h3 className="glass-panel-header">Target Borrower: Cash Buffer Trajectory</h3>
-                  <ResponsiveContainer width="100%" height="85%">
-                    <AreaChart data={transformChartData(result.trajectory)} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              {summary && (
+                <div className="grid-3">
+                  <div className="metric-card">
+                    <span className="metric-label">Target cash buffer · week {summary.weeks}</span>
+                    <div className="metric-primary is-counterfactual">{currency(summary.cash.scenario)}</div>
+                    <div className="metric-sub">
+                      Baseline {currency(summary.cash.baseline)} · delta {summary.cash.delta >= 0 ? '+' : ''}{currency(summary.cash.delta)}
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <span className="metric-label">Cumulative target shortfall</span>
+                    <div className="metric-primary is-counterfactual">{currency(summary.shortfall.scenario)}</div>
+                    <div className="metric-sub">Baseline {currency(summary.shortfall.baseline)}</div>
+                  </div>
+                  <div className="metric-card">
+                    <span className="metric-label">Avg peer cash buffer · week {summary.weeks}</span>
+                    <div className="metric-primary is-counterfactual">{currency(summary.peerCash.scenario)}</div>
+                    <div className="metric-sub">
+                      Across {count(summary.peerCount)} peers · baseline {currency(summary.peerCash.baseline)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <Panel title="Target borrower — cash buffer trajectory" icon={Waves} semantic="counterfactual">
+                <div className="chart-frame">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={series} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
                       <defs>
-                        <linearGradient id="colorBaseline" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#94a3b8" stopOpacity={0}/>
+                        <linearGradient id="gradBase" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#7c8aa5" stopOpacity={0.28} />
+                          <stop offset="100%" stopColor="#7c8aa5" stopOpacity={0} />
                         </linearGradient>
-                        <linearGradient id="colorScenario" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#f87171" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#f87171" stopOpacity={0}/>
+                        <linearGradient id="gradScen" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#a97bf5" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#a97bf5" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                      <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} tickFormatter={(val) => `$${val}`} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#1e293b', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}
-                        itemStyle={{ color: '#fff' }}
-                      />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }}/>
-                      <Area type="monotone" dataKey="baselineCash" name="Baseline" stroke="#94a3b8" fillOpacity={1} fill="url(#colorBaseline)" />
-                      <Area type="monotone" dataKey="scenarioCash" name="Scenario" stroke="#f87171" fillOpacity={1} fill="url(#colorScenario)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                      <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#1c2434' }} />
+                      <YAxis tickLine={false} axisLine={{ stroke: '#1c2434' }} tickFormatter={cashAxis} width={58} />
+                      <Tooltip contentStyle={tipStyle} formatter={(v) => currency(v, true)}
+                        labelFormatter={(l) => `Week ${String(l).replace('W', '')}`} />
+                      <Legend iconType="plainline" wrapperStyle={{ fontSize: 11.5 }} />
+                      <Area type="monotone" dataKey="baselineCash" name="Baseline (no shock)"
+                        stroke="#7c8aa5" strokeWidth={1.8} fill="url(#gradBase)" />
+                      <Area type="monotone" dataKey="scenarioCash" name="Scenario (with shock)"
+                        stroke="#a97bf5" strokeWidth={2} fill="url(#gradScen)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
+                <p className="chart-caption">
+                  Cash buffer in ₹ for the target borrower each week. The scenario line diverges from
+                  the baseline only through the modeled shock.
+                </p>
+              </Panel>
 
-                {/* Downstream Effects: Peer Cash Buffer Drain */}
-                <div className="glass-panel" style={{ height: '300px' }}>
-                  <h3 className="glass-panel-header text-teal-400">Downstream Ripple: Avg Peer Cash Buffer</h3>
-                  <p className="text-xs text-gray-400 mb-4 -mt-2">Group members use their cash to cover target's shortfall (Joint Liability)</p>
-                  <ResponsiveContainer width="100%" height="85%">
-                    <LineChart data={transformChartData(result.trajectory)} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                      <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} tickFormatter={(val) => `$${val}`} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#1e293b', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}
-                      />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }}/>
-                      <Line type="monotone" dataKey="peerBaselineCash" name="Baseline Avg Peer Cash" stroke="#94a3b8" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="peerScenarioCash" name="Scenario Avg Peer Cash" stroke="#2dd4bf" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="grid-2">
+                <Panel title="Downstream — average peer cash buffer" icon={Users} semantic="counterfactual">
+                  <div className="chart-frame--sm chart-frame">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={series} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#1c2434' }} />
+                        <YAxis tickLine={false} axisLine={{ stroke: '#1c2434' }} tickFormatter={peerAxis} width={58} />
+                        <Tooltip contentStyle={tipStyle} formatter={(v) => currency(v, true)} />
+                        <Legend iconType="plainline" wrapperStyle={{ fontSize: 11.5 }} />
+                        <Line type="monotone" dataKey="peerBaselineCash" name="Baseline" stroke="#7c8aa5" strokeWidth={1.8} dot={false} />
+                        <Line type="monotone" dataKey="peerScenarioCash" name="Scenario" stroke="#a97bf5" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="chart-caption">
+                    Under the modeled joint-liability mechanism, healthy members contribute cash toward
+                    a member's shortfall, which draws down their own buffers.
+                  </p>
+                </Panel>
+
+                <Panel title="Target shortfall per week" icon={TriangleAlert} semantic="counterfactual">
+                  {noShortfall ? (
+                    <EmptyState icon={TriangleAlert} title="No shortfall in either arm"
+                      message={`Over this ${series.length}-week horizon the target borrower meets every scheduled repayment in both the baseline and the scenario, so there is nothing to plot.`} />
+                  ) : (
+                    <>
+                      <div className="chart-frame--sm chart-frame">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={series} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                            <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#1c2434' }} />
+                            <YAxis tickLine={false} axisLine={{ stroke: '#1c2434' }} tickFormatter={sfAxis} width={58} />
+                            <Tooltip contentStyle={tipStyle} formatter={(v) => currency(v, true)} />
+                            <Legend iconType="plainline" wrapperStyle={{ fontSize: 11.5 }} />
+                            <Line type="monotone" dataKey="baselineShortfall" name="Baseline" stroke="#7c8aa5" strokeWidth={1.8} dot={false} />
+                            <Line type="monotone" dataKey="scenarioShortfall" name="Scenario" stroke="#f0656f" strokeWidth={2} dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <p className="chart-caption">Unpaid amount remaining after each weekly collection.</p>
+                    </>
+                  )}
+                </Panel>
               </div>
-            </>
+
+              <Panel>
+                <div className="action-bar">
+                  <button className="btn" onClick={() => { setBorrowerId(result.borrower_id); nav('/intervene'); }}>
+                    <SlidersHorizontal size={14} aria-hidden="true" /> Explore an intervention for {result.borrower_id}
+                  </button>
+                  <button className="btn" onClick={() => { setBorrowerId(result.borrower_id); nav('/borrower'); }}>
+                    <Users size={14} aria-hidden="true" /> Back to dossier
+                  </button>
+                </div>
+              </Panel>
+            </div>
           )}
         </div>
       </div>
-    </div>
+    </>
   );
-};
-
-export default RippleSimulator;
+}
