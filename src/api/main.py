@@ -60,8 +60,8 @@ def get_portfolio_summary():
     total_exposure = float(current_df['borrower_propagation_exposure'].sum())
     
     return {
-        "as_of_week": as_of,
-        "total_eligible_borrowers": len(current_df),
+        "as_of_week": int(as_of),
+        "total_eligible_borrowers": int(len(current_df)),
         "network_exposed_borrowers": network_exposed_borrowers,
         "aggregate_network_exposure_index": total_exposure,
     }
@@ -120,23 +120,50 @@ def get_group(id: str):
     if len(group_members) == 0:
         raise HTTPException(status_code=404, detail="Group not found or no eligible members")
         
-    members_data = []
+    nodes = []
+    member_ids = []
     for _, row in group_members.iterrows():
-        members_data.append({
-            "borrower_id": f"B{int(row['borrower_id'])}" if isinstance(row['borrower_id'], (int, float)) else str(row['borrower_id']),
+        b_id_str = f"B{int(row['borrower_id'])}" if isinstance(row['borrower_id'], (int, float)) else str(row['borrower_id'])
+        member_ids.append(b_id_str)
+        nodes.append({
+            "id": b_id_str,
+            "group_id": f"G{int(g_id)}" if isinstance(g_id, (int, float)) else str(g_id),
             "current_stress": bool(row['current_stress']),
             "operational_risk_score": float(row.get('model_c_score', 0)),
             "borrower_propagation_exposure": float(row.get('borrower_propagation_exposure', 0)),
             "cash_buffer_mean_4w": float(row.get('cash_buffer_mean_4w', 0)),
-            "liability_share": float(row.get('borrower_liability_share', 1.0))
+            "liability_share": float(row['borrower_liability_share'])
         })
         
+    # Central JLG group node
+    group_node_id = f"G{int(g_id)}" if isinstance(g_id, (int, float)) else str(g_id)
+    nodes.append({
+        "id": group_node_id,
+        "type": "group",
+        "current_stress": False,
+        "operational_risk_score": 0.0,
+        "borrower_propagation_exposure": 0.0,
+        "cash_buffer_mean_4w": 0.0,
+        "liability_share": 1.0
+    })
+        
+    # Star graph topology representing Branch -> Centre -> JLG -> Borrowers
+    edges = []
+    for member_id in member_ids:
+        # Edge from group liability mechanism to member borrower
+        edges.append({
+            "source": group_node_id,
+            "target": member_id,
+            "type": "group_liability"
+        })
+            
     return {
-        "group_id": f"G{int(g_id)}" if isinstance(g_id, (int, float)) else str(g_id),
-        "member_count": len(members_data),
-        "members": members_data,
-        "aggregate_group_exposure": sum(m['borrower_propagation_exposure'] for m in members_data),
-        "group_coverage_utilization": 0.0 # Placeholder for actual utilization computation if available
+        "group_id": group_node_id,
+        "member_count": len(member_ids),
+        "nodes": nodes,
+        "edges": edges,
+        "aggregate_group_exposure": sum(float(row.get('borrower_propagation_exposure', 0)) for _, row in group_members.iterrows()),
+        "group_coverage_utilization": 0.0 # Placeholder
     }
 
 @app.get("/network")
@@ -172,15 +199,28 @@ def simulate(req: SimulationRequest):
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
         
-    state = store.get_baseline_state_copy()
+    baseline_state = store.get_baseline_state_copy()
+    scenario_state = store.get_baseline_state_copy()
+    
     b_id = req.borrower_id
-    if b_id not in state.borrower_to_household:
+    if b_id not in baseline_state.borrower_to_household:
         raise HTTPException(status_code=404, detail="Borrower not found in simulation state")
         
-    hh_id = state.borrower_to_household[b_id]
+    hh_id = scenario_state.borrower_to_household[b_id]
     
-    # 1. Apply Shock to baseline
-    hh = state.households[hh_id]
+    # Identify group to track ripple effects
+    group_id = None
+    for l_id, l in scenario_state.loans.items():
+        if l.borrower_id == b_id:
+            group_id = l.group_id
+            break
+            
+    group_members = []
+    if group_id and group_id in scenario_state.groups:
+        group_members = scenario_state.groups[group_id].members
+    
+    # 1. Apply Shock to scenario
+    hh = scenario_state.households[hh_id]
     if req.shock_type == "income_reduction":
         hh.weekly_income = max(0.0, hh.weekly_income - req.shock_magnitude)
     elif req.shock_type == "expense_increase":
@@ -188,22 +228,52 @@ def simulate(req: SimulationRequest):
     elif req.shock_type == "cash_shock":
         hh.cash_buffer = max(0.0, hh.cash_buffer - req.shock_magnitude)
         
-    # 2. Step forward deterministic simulation
-    baseline_deltas = []
+    # 2. Step forward deterministic simulation for BOTH
+    trajectory = []
+    
     for w in range(req.shock_duration_weeks):
-        state, shortfalls, group_coverage = step_forward(state)
-        # Track borrower and group burden changes
-        baseline_deltas.append({
+        baseline_state, b_sf, b_cov = step_forward(baseline_state)
+        scenario_state, s_sf, s_cov = step_forward(scenario_state)
+        
+        week_data = {
             "week": w + 1,
-            "shortfall": shortfalls.get(b_id, 0.0),
-            "group_coverage_used": group_coverage.get(b_id, 0.0)
-        })
+            "target_borrower": {
+                "baseline": {
+                    "cash_buffer": baseline_state.households[baseline_state.borrower_to_household[b_id]].cash_buffer,
+                    "shortfall": b_sf.get(b_id, 0.0),
+                    "group_coverage_used": b_cov.get(b_id, 0.0)
+                },
+                "scenario": {
+                    "cash_buffer": scenario_state.households[scenario_state.borrower_to_household[b_id]].cash_buffer,
+                    "shortfall": s_sf.get(b_id, 0.0),
+                    "group_coverage_used": s_cov.get(b_id, 0.0)
+                }
+            },
+            "group_members": {}
+        }
+        
+        for gm in group_members:
+            if gm != b_id:
+                week_data["group_members"][gm] = {
+                    "baseline": {
+                        "cash_buffer": baseline_state.households[baseline_state.borrower_to_household[gm]].cash_buffer,
+                        "shortfall": b_sf.get(gm, 0.0),
+                        "group_coverage_used": b_cov.get(gm, 0.0)
+                    },
+                    "scenario": {
+                        "cash_buffer": scenario_state.households[scenario_state.borrower_to_household[gm]].cash_buffer,
+                        "shortfall": s_sf.get(gm, 0.0),
+                        "group_coverage_used": s_cov.get(gm, 0.0)
+                    }
+                }
+                
+        trajectory.append(week_data)
         
     return {
         "status": "success",
         "scenario_type": req.shock_type,
         "borrower_id": b_id,
-        "trajectory": baseline_deltas,
+        "trajectory": trajectory,
         "disclaimer": "Scenario simulation — not a guaranteed forecast. Outputs represent modeled downstream effects under strict deterministic assumptions."
     }
 
@@ -212,48 +282,84 @@ def intervene(req: InterventionRequest):
     if not store._loaded:
         raise HTTPException(status_code=503, detail="Data store not loaded")
         
-    state = store.get_baseline_state_copy()
+    baseline_state = store.get_baseline_state_copy()
+    scenario_state = store.get_baseline_state_copy()
+    
     b_id = req.borrower_id
-    if b_id not in state.borrower_to_household:
+    if b_id not in baseline_state.borrower_to_household:
         raise HTTPException(status_code=404, detail="Borrower not found in simulation state")
         
-    hh_id = state.borrower_to_household[b_id]
-    hh = state.households[hh_id]
-    
-    # Identify loan
-    loan = None
-    for l_id, l in state.loans.items():
+    # Identify group to track ripple effects
+    group_id = None
+    for l_id, l in scenario_state.loans.items():
         if l.borrower_id == b_id:
-            loan = l
+            group_id = l.group_id
             break
             
-    if not loan:
-        raise HTTPException(status_code=400, detail="No active loan found for borrower")
-
-    # Apply intervention
-    if req.intervention_type == "restructure":
-        loan.weekly_instalment = max(0.0, loan.weekly_instalment - req.amount)
-    elif req.intervention_type == "cash_injection":
-        hh.cash_buffer += req.amount
-    elif req.intervention_type == "payment_adjustment":
-        loan.amount_due = max(0.0, loan.amount_due - req.amount)
+    group_members = []
+    if group_id and group_id in scenario_state.groups:
+        group_members = scenario_state.groups[group_id].members
         
-    # Step forward
-    baseline_deltas = []
+    # Apply intervention via dedicated module
+    from src.interventions import apply_intervention
+    try:
+        apply_intervention(scenario_state, b_id, req.intervention_type, req.amount)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    # Step forward deterministic simulation for BOTH
+    trajectory = []
+    
     for w in range(req.duration_weeks):
-        state, shortfalls, group_coverage = step_forward(state)
-        baseline_deltas.append({
+        baseline_state, b_sf, b_cov = step_forward(baseline_state)
+        scenario_state, s_sf, s_cov = step_forward(scenario_state)
+        
+        # Get target loan amount due for both states
+        b_loan_base = next((l for l in baseline_state.loans.values() if l.borrower_id == b_id), None)
+        b_loan_scen = next((l for l in scenario_state.loans.values() if l.borrower_id == b_id), None)
+        
+        week_data = {
             "week": w + 1,
-            "shortfall": shortfalls.get(b_id, 0.0),
-            "amount_due": loan.amount_due
-        })
+            "target_borrower": {
+                "baseline": {
+                    "cash_buffer": baseline_state.households[baseline_state.borrower_to_household[b_id]].cash_buffer,
+                    "shortfall": b_sf.get(b_id, 0.0),
+                    "amount_due": b_loan_base.amount_due if b_loan_base else 0.0,
+                    "group_coverage_used": b_cov.get(b_id, 0.0)
+                },
+                "scenario": {
+                    "cash_buffer": scenario_state.households[scenario_state.borrower_to_household[b_id]].cash_buffer,
+                    "shortfall": s_sf.get(b_id, 0.0),
+                    "amount_due": b_loan_scen.amount_due if b_loan_scen else 0.0,
+                    "group_coverage_used": s_cov.get(b_id, 0.0)
+                }
+            },
+            "group_members": {}
+        }
+        
+        for gm in group_members:
+            if gm != b_id:
+                week_data["group_members"][gm] = {
+                    "baseline": {
+                        "cash_buffer": baseline_state.households[baseline_state.borrower_to_household[gm]].cash_buffer,
+                        "shortfall": b_sf.get(gm, 0.0),
+                        "group_coverage_used": b_cov.get(gm, 0.0)
+                    },
+                    "scenario": {
+                        "cash_buffer": scenario_state.households[scenario_state.borrower_to_household[gm]].cash_buffer,
+                        "shortfall": s_sf.get(gm, 0.0),
+                        "group_coverage_used": s_cov.get(gm, 0.0)
+                    }
+                }
+                
+        trajectory.append(week_data)
         
     return {
         "status": "success",
         "scenario_type": req.intervention_type,
         "borrower_id": b_id,
-        "trajectory": baseline_deltas,
-        "disclaimer": "Under the stated model assumptions, this counterfactual intervention produces the above deterministic delta. It is not a causal prediction of real-world outcomes."
+        "trajectory": trajectory,
+        "disclaimer": "Modeled counterfactual under stated assumptions."
     }
 
 @app.get("/evaluation")
@@ -268,10 +374,17 @@ def get_assumptions():
         raise HTTPException(status_code=503, detail="Data store not loaded")
         
     return {
-        "world_seed": store.world_state['seed'],
+        "world_seed": int(store.world_state['seed']),
         "generator_version": "1.0",
         "analytics_version": "M2C-FROZEN",
-        "demo_as_of_timestamp": store.get_as_of_week(),
+        "demo_as_of_timestamp": int(store.get_as_of_week()),
+        "temporal_evaluation_rules": "Purge gap minimum 4 weeks strictly enforced",
+        "propagation_horizon": "4-week",
+        "pv_threshold": ">= 0.30",
+        "attribution_basis": "cumulative-shortfall",
+        "operational_risk_score_definition": "CALIBRATED MODEL C SCORE",
+        "network_propagation_evidence_definition": "DIAGNOSTIC EVIDENCE",
+        "synthetic_data_disclaimer": "Results are specific to the synthetic worlds generated under the current NEXUS assumptions.",
         "disclaimers": [
             "Model C did not demonstrate measurable incremental predictive value over Model B in the evaluated synthetic dataset.",
             "Network / Propagation evidence is diagnostic information only, not predictive."

@@ -5,12 +5,13 @@ import './index.css';
 
 import CommandCenter from './CommandCenter';
 import BorrowerIntelligence from './BorrowerIntelligence';
+import NetworkIntelligence from './NetworkIntelligence';
+import RippleSimulator from './RippleSimulator';
+import InterventionStudio from './InterventionStudio';
+import ModelImpactLab from './ModelImpactLab';
 
-// Placeholder Components
-const NetworkIntelligence = () => <div className="glass-panel"><h2>Network Intelligence</h2><p>Select a group to view network structure.</p></div>;
-const RippleSimulator = () => <div className="glass-panel"><h2>Ripple Simulator</h2><p>Select a borrower and define a shock scenario.</p></div>;
-const InterventionStudio = () => <div className="glass-panel"><h2>Intervention Studio</h2><p>No interventions applied yet.</p></div>;
-const ModelImpactLab = () => <div className="glass-panel"><h2>Model & Impact Lab</h2><p>Loading frozen M2C evaluation metrics...</p></div>;
+// No placeholder components remaining
+
 
 function App() {
   return (
